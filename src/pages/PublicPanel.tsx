@@ -190,6 +190,16 @@ export default function PublicPanel() {
             <h1 className="text-3xl font-bold tracking-tight">{business.name}</h1>
             {business.slogan && <p className="text-orange-100 text-xs uppercase font-bold tracking-widest mt-1">{business.slogan}</p>}
             <p className="mt-3 text-orange-50 font-medium bg-orange-500/30 px-4 py-1 rounded-full inline-block">{business.rewardDescription}</p>
+            {customer?.level && (
+              <div className={cn(
+                "mt-3 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-sm",
+                customer.level === 'gold' ? "bg-gradient-to-r from-yellow-400 to-yellow-600 text-white" :
+                customer.level === 'silver' ? "bg-gradient-to-r from-gray-300 to-gray-500 text-white" :
+                "bg-orange-800/40 text-orange-100 border border-orange-400/20"
+              )}>
+                Cliente {customer.level}
+              </div>
+            )}
           </div>
         </div>
 

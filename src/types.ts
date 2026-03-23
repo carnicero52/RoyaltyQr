@@ -18,13 +18,26 @@ export interface Business {
   whatsappPhone?: string;
   whatsappApiKey?: string;
   currency?: string;
+  // New: Loyalty Levels Config
+  levels?: {
+    silver: { minSpent: number; multiplier: number };
+    gold: { minSpent: number; multiplier: number };
+  };
+}
+
+export interface Staff {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'staff';
+  businessId: string;
 }
 
 export interface Reminder {
   id: string;
   businessId: string;
-  customerId?: string; // Optional for individual, null for batch
-  customerIds?: string[]; // For batch
+  customerId?: string;
+  customerIds?: string[];
   type: 'billing' | 'marketing';
   subject: string;
   message: string;
@@ -33,7 +46,7 @@ export interface Reminder {
 }
 
 export interface Customer {
-  id: string; // Phone number
+  id: string;
   phone: string;
   name?: string;
   email?: string;
@@ -43,6 +56,10 @@ export interface Customer {
   totalSpent?: number;
   lastPurchaseAt?: string;
   businessId: string;
+  // New: Loyalty & Referrals
+  level?: 'bronze' | 'silver' | 'gold';
+  referredBy?: string;
+  referralCount?: number;
 }
 
 export interface Purchase {
@@ -53,4 +70,5 @@ export interface Purchase {
   paymentMethod?: string;
   notes?: string;
   timestamp: string;
+  staffId?: string; // Who registered the purchase
 }

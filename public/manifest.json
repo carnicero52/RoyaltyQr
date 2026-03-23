@@ -1,0 +1,21 @@
+{
+  "name": "Fideliza - Sistema de Fidelización",
+  "short_name": "Fideliza",
+  "description": "Sistema de fidelización de clientes con sellos y recompensas.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ea580c",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/fideliza/192/192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://picsum.photos/seed/fideliza/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

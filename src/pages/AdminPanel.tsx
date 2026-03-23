@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy, deleteDoc, addDoc, where, onSnapshot, increment } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import { Business, Customer, Purchase, Reminder } from "../types";
+import { Business, Customer, Purchase, Reminder, Staff } from "../types";
 import { 
   Settings, Users, QrCode, BarChart3, LogOut, Save, Plus, Search, 
   Edit2, Trash2, Download, FileText, Mail, Send, Bell, Gift,
@@ -21,10 +21,11 @@ import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<"config" | "customers" | "qr" | "stats" | "billing" | "marketing" | "rewards">("config");
+  const [activeTab, setActiveTab] = useState<"config" | "customers" | "qr" | "stats" | "billing" | "marketing" | "rewards" | "staff">("config");
   const [business, setBusiness] = useState<Business | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -43,6 +44,57 @@ export default function AdminPanel() {
   });
 
   const qrRef = useRef<HTMLDivElement>(null);
+
+  const exportToCSV = (data: any[], fileName: string) => {
+    if (!data.length) return;
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+      headers.join(","),
+      ...data.map(row => headers.map(header => JSON.stringify(row[header] || "")).join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${fileName}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const generateReceiptPDF = (purchase: Purchase, customer: Customer) => {
+    const doc = new jsPDF();
+    const businessName = business?.name || "Mi Negocio";
+    
+    doc.setFontSize(20);
+    doc.text(businessName, 105, 20, { align: "center" });
+    
+    doc.setFontSize(12);
+    doc.text("RECIBO DE PAGO", 105, 30, { align: "center" });
+    
+    doc.line(20, 35, 190, 35);
+    
+    doc.text(`Fecha: ${format(new Date(purchase.timestamp), "dd/MM/yyyy HH:mm")}`, 20, 45);
+    doc.text(`Cliente: ${customer.name || customer.phone}`, 20, 55);
+    doc.text(`Teléfono: ${customer.phone}`, 20, 65);
+    
+    doc.line(20, 70, 190, 70);
+    
+    doc.setFontSize(14);
+    doc.text("Detalle:", 20, 80);
+    doc.text(`Monto: ${business?.currency || "$"} ${purchase.amount?.toLocaleString()}`, 20, 90);
+    doc.text(`Método: ${purchase.paymentMethod}`, 20, 100);
+    if (purchase.notes) {
+      doc.text(`Notas: ${purchase.notes}`, 20, 110);
+    }
+    
+    doc.setFontSize(10);
+    doc.text("¡Gracias por su preferencia!", 105, 150, { align: "center" });
+    
+    doc.save(`recibo-${purchase.id}.pdf`);
+  };
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -89,11 +141,18 @@ export default function AdminPanel() {
       setReminders(list);
     });
 
+    // Real-time Staff
+    const unsubStaff = onSnapshot(collection(db, "businesses", uid, "staff"), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Staff));
+      setStaff(list);
+    });
+
     return () => {
       unsubBusiness();
       unsubCustomers();
       unsubPurchases();
       unsubReminders();
+      unsubStaff();
     };
   }, []);
 
@@ -147,14 +206,15 @@ export default function AdminPanel() {
     const name = formData.get("name") as string;
     const email = formData.get("email") as string;
     const notes = formData.get("notes") as string;
+    const referredBy = formData.get("referredBy") as string;
 
     if (!phone || phone.length < 8) {
-      alert("Please enter a valid phone number.");
+      alert("Por favor ingrese un número de teléfono válido.");
       return;
     }
 
     if (customers.some(c => c.phone === phone)) {
-      alert("A customer with this phone number already exists.");
+      alert("Ya existe un cliente con este número de teléfono.");
       return;
     }
 
@@ -169,8 +229,24 @@ export default function AdminPanel() {
         couponsCount: 0,
         totalSpent: 0,
         businessId: business!.id,
+        level: 'bronze',
+        referredBy: referredBy || undefined,
+        referralCount: 0
       };
       await setDoc(doc(db, "businesses", business!.id, "customers", phone), newCust);
+      
+      // Si fue referido, dar un bono al referente
+      if (referredBy) {
+        const referrerRef = doc(db, "businesses", business!.id, "customers", referredBy);
+        const referrerSnap = await getDoc(referrerRef);
+        if (referrerSnap.exists()) {
+          await updateDoc(referrerRef, {
+            referralCount: increment(1),
+            couponsCount: increment(1) // Sello de regalo por referir
+          });
+        }
+      }
+
       setSearchTerm("");
       setIsAddingCustomer(false);
     } catch (err) {
@@ -208,12 +284,29 @@ export default function AdminPanel() {
     try {
       const now = new Date().toISOString();
       const customerRef = doc(db, "businesses", business.id, "customers", isAddingPurchase);
+      const customerSnap = await getDoc(customerRef);
+      const customerData = customerSnap.data() as Customer;
       
+      // Calculate coupons based on level
+      let couponsToAdd = 1;
+      if (customerData.level === 'silver') couponsToAdd = business.levels?.silver.multiplier || 1.5;
+      if (customerData.level === 'gold') couponsToAdd = business.levels?.gold.multiplier || 2;
+
+      const newTotalSpent = (customerData.totalSpent || 0) + amount;
+      
+      // Determine new level
+      let newLevel = customerData.level || 'bronze';
+      if (business.levels) {
+        if (newTotalSpent >= business.levels.gold.minSpent) newLevel = 'gold';
+        else if (newTotalSpent >= business.levels.silver.minSpent) newLevel = 'silver';
+      }
+
       // Update Customer
       await updateDoc(customerRef, {
-        couponsCount: increment(1),
+        couponsCount: increment(couponsToAdd),
         totalSpent: increment(amount),
         lastPurchaseAt: now,
+        level: newLevel
       });
 
       // Record Purchase
@@ -224,6 +317,7 @@ export default function AdminPanel() {
         paymentMethod,
         notes,
         timestamp: now,
+        staffId: auth.currentUser?.uid
       });
 
       setIsAddingPurchase(null);
@@ -301,40 +395,6 @@ export default function AdminPanel() {
       downloadLink.click();
     };
     img.src = "data:image/svg+xml;base64," + btoa(svgData);
-  };
-
-  const exportToCSV = () => {
-    const headers = ["Teléfono", "Nombre", "Email", "Cupones", "Última Compra"];
-    const rows = customers.map(c => [
-      c.phone,
-      c.name || "",
-      c.email || "",
-      c.couponsCount,
-      c.lastPurchaseAt ? format(new Date(c.lastPurchaseAt), "yyyy-MM-dd HH:mm") : ""
-    ]);
-    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "customers.csv";
-    link.click();
-  };
-
-  const exportToPDF = () => {
-    const doc = new jsPDF();
-    doc.text("Lista de Clientes - Fideliza", 14, 15);
-    (doc as any).autoTable({
-      startY: 20,
-      head: [["Teléfono", "Nombre", "Email", "Cupones", "Última Compra"]],
-      body: customers.map(c => [
-        c.phone,
-        c.name || "",
-        c.email || "",
-        c.couponsCount,
-        c.lastPurchaseAt ? format(new Date(c.lastPurchaseAt), "yyyy-MM-dd HH:mm") : ""
-      ]),
-    });
-    doc.save("customers.pdf");
   };
 
   if (loading) {
@@ -467,6 +527,16 @@ export default function AdminPanel() {
             <Megaphone className="h-5 w-5" />
             <span className="font-medium">Marketing</span>
           </button>
+          <button
+            onClick={() => setActiveTab("staff")}
+            className={cn(
+              "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
+              activeTab === "staff" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+            )}
+          >
+            <Users className="h-5 w-5" />
+            <span className="font-medium">Equipo</span>
+          </button>
         </nav>
 
         <div className="p-4 border-t border-gray-100">
@@ -495,6 +565,7 @@ export default function AdminPanel() {
              <button onClick={() => setActiveTab("stats")} className={cn("p-2 rounded-lg", activeTab === "stats" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><BarChart3 className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("billing")} className={cn("p-2 rounded-lg", activeTab === "billing" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><CreditCard className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("marketing")} className={cn("p-2 rounded-lg", activeTab === "marketing" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Megaphone className="h-5 w-5" /></button>
+             <button onClick={() => setActiveTab("staff")} className={cn("p-2 rounded-lg", activeTab === "staff" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Users className="h-5 w-5" /></button>
              <button onClick={() => auth.signOut()} className="p-2 rounded-lg text-red-400"><LogOut className="h-5 w-5" /></button>
           </div>
         </header>
@@ -654,6 +725,99 @@ export default function AdminPanel() {
                     )}
                   </div>
                 </div>
+
+                <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6 md:col-span-2">
+                  <h2 className="text-xl font-bold flex items-center space-x-2"><TrendingUp className="h-5 w-5 text-orange-600" /><span>Niveles de Fidelidad (Gamificación)</span></h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="p-6 bg-gray-50 rounded-2xl space-y-4 border border-gray-100">
+                      <div className="flex items-center space-x-2 text-gray-400">
+                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center font-bold text-xs">B</div>
+                        <span className="font-bold">Nivel Bronce (Base)</span>
+                      </div>
+                      <p className="text-sm text-gray-500">Nivel inicial para todos los clientes nuevos.</p>
+                    </div>
+                    
+                    <div className="p-6 bg-orange-50 rounded-2xl space-y-4 border border-orange-100">
+                      <div className="flex items-center space-x-2 text-orange-600">
+                        <div className="w-8 h-8 rounded-full bg-orange-200 flex items-center justify-center font-bold text-xs">S</div>
+                        <span className="font-bold">Nivel Plata</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Gasto Mínimo ({business.currency})</label>
+                          <input
+                            type="number"
+                            value={business.levels?.silver.minSpent || 500}
+                            onChange={e => setBusiness({ 
+                              ...business, 
+                              levels: { 
+                                silver: { minSpent: parseFloat(e.target.value), multiplier: business.levels?.silver.multiplier || 1.5 },
+                                gold: business.levels?.gold || { minSpent: 1500, multiplier: 2 }
+                              } 
+                            })}
+                            className="w-full px-3 py-2 rounded-lg border-gray-200 border text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Multiplicador Sellos</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={business.levels?.silver.multiplier || 1.5}
+                            onChange={e => setBusiness({ 
+                              ...business, 
+                              levels: { 
+                                silver: { minSpent: business.levels?.silver.minSpent || 500, multiplier: parseFloat(e.target.value) },
+                                gold: business.levels?.gold || { minSpent: 1500, multiplier: 2 }
+                              } 
+                            })}
+                            className="w-full px-3 py-2 rounded-lg border-gray-200 border text-sm"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-6 bg-yellow-50 rounded-2xl space-y-4 border border-yellow-100">
+                      <div className="flex items-center space-x-2 text-yellow-600">
+                        <div className="w-8 h-8 rounded-full bg-yellow-200 flex items-center justify-center font-bold text-xs">G</div>
+                        <span className="font-bold">Nivel Oro</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Gasto Mínimo ({business.currency})</label>
+                          <input
+                            type="number"
+                            value={business.levels?.gold.minSpent || 1500}
+                            onChange={e => setBusiness({ 
+                              ...business, 
+                              levels: { 
+                                silver: business.levels?.silver || { minSpent: 500, multiplier: 1.5 },
+                                gold: { minSpent: parseFloat(e.target.value), multiplier: business.levels?.gold.multiplier || 2 }
+                              } 
+                            })}
+                            className="w-full px-3 py-2 rounded-lg border-gray-200 border text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Multiplicador Sellos</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={business.levels?.gold.multiplier || 2}
+                            onChange={e => setBusiness({ 
+                              ...business, 
+                              levels: { 
+                                silver: business.levels?.silver || { minSpent: 500, multiplier: 1.5 },
+                                gold: { minSpent: business.levels?.gold.minSpent || 1500, multiplier: parseFloat(e.target.value) }
+                              } 
+                            })}
+                            className="w-full px-3 py-2 rounded-lg border-gray-200 border text-sm"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}
@@ -751,8 +915,7 @@ export default function AdminPanel() {
                   <p className="text-gray-500 mt-1">Gestiona tu base de clientes y su progreso.</p>
                 </div>
                 <div className="flex space-x-2">
-                  <button onClick={exportToCSV} className="flex items-center space-x-2 bg-white border border-gray-200 px-4 py-2 rounded-xl text-gray-700 hover:bg-gray-50 transition-all font-medium"><Download className="h-4 w-4" /><span>CSV</span></button>
-                  <button onClick={exportToPDF} className="flex items-center space-x-2 bg-white border border-gray-200 px-4 py-2 rounded-xl text-gray-700 hover:bg-gray-50 transition-all font-medium"><FileText className="h-4 w-4" /><span>PDF</span></button>
+                  <button onClick={() => exportToCSV(customers, "clientes")} className="flex items-center space-x-2 bg-white border border-gray-200 px-4 py-2 rounded-xl text-gray-700 hover:bg-gray-50 transition-all font-medium"><Download className="h-4 w-4" /><span>CSV</span></button>
                   <button onClick={() => setIsAddingCustomer(true)} className="flex items-center space-x-2 bg-orange-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-orange-700 transition-all"><Plus className="h-4 w-4" /><span>Añadir Cliente</span></button>
                 </div>
               </div>
@@ -804,8 +967,13 @@ export default function AdminPanel() {
                           <tr key={c.id} className="hover:bg-gray-50/50 transition-all">
                             <td className="px-6 py-4">
                               <div className="flex items-center space-x-3">
-                                <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">
-                                  {c.name ? c.name[0].toUpperCase() : "?"}
+                                <div className={cn(
+                                  "h-10 w-10 rounded-full flex items-center justify-center font-bold text-xs",
+                                  c.level === 'gold' ? "bg-yellow-100 text-yellow-600" :
+                                  c.level === 'silver' ? "bg-gray-100 text-gray-600" :
+                                  "bg-orange-100 text-orange-600"
+                                )}>
+                                  {c.level === 'gold' ? 'G' : c.level === 'silver' ? 'S' : 'B'}
                                 </div>
                                 <div>
                                   <p className="font-bold text-gray-900">{c.name || "Cliente sin nombre"}</p>
@@ -978,9 +1146,13 @@ export default function AdminPanel() {
                     <p className="text-xs text-gray-500 uppercase font-bold">Total Recaudado</p>
                     <p className="text-2xl font-bold text-orange-600">{business?.currency || "$"} {purchases.reduce((sum, p) => sum + (p.amount || 0), 0).toLocaleString()}</p>
                   </div>
-                  <div className="p-3 bg-orange-50 rounded-xl text-orange-600">
-                    <TrendingUp className="h-6 w-6" />
-                  </div>
+                  <button 
+                    onClick={() => exportToCSV(purchases, "cobranzas")}
+                    className="p-3 bg-orange-50 rounded-xl text-orange-600 hover:bg-orange-100 transition-all"
+                    title="Exportar CSV"
+                  >
+                    <Download className="h-6 w-6" />
+                  </button>
                 </div>
               </div>
 
@@ -995,12 +1167,13 @@ export default function AdminPanel() {
                           <th className="px-6 py-4">Monto</th>
                           <th className="px-6 py-4">Método</th>
                           <th className="px-6 py-4">Notas</th>
+                          <th className="px-6 py-4 text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {purchases.length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="px-6 py-12 text-center text-gray-400">No hay registros de cobranzas aún.</td>
+                            <td colSpan={6} className="px-6 py-12 text-center text-gray-400">No hay registros de cobranzas aún.</td>
                           </tr>
                         ) : (
                           purchases.map(p => {
@@ -1024,6 +1197,15 @@ export default function AdminPanel() {
                                 </td>
                                 <td className="px-6 py-4 text-sm text-gray-500 italic">
                                   {p.notes || "-"}
+                                </td>
+                                <td className="px-6 py-4 text-right">
+                                  <button 
+                                    onClick={() => cust && generateReceiptPDF(p, cust)} 
+                                    className="p-2 text-gray-400 hover:text-orange-600 transition-all" 
+                                    title="Descargar Recibo PDF"
+                                  >
+                                    <FileText className="h-5 w-5" />
+                                  </button>
                                 </td>
                               </tr>
                             );
@@ -1298,6 +1480,82 @@ export default function AdminPanel() {
               </div>
             </motion.div>
           )}
+
+          {activeTab === "staff" && business && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">Gestión de Equipo</h1>
+                  <p className="text-gray-500 mt-1">Administra los accesos de tus empleados.</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const email = prompt("Email del empleado:");
+                    const name = prompt("Nombre del empleado:");
+                    if (email && name) {
+                      await addDoc(collection(db, "businesses", business.id, "staff"), {
+                        email,
+                        name,
+                        role: 'staff',
+                        businessId: business.id
+                      });
+                    }
+                  }}
+                  className="flex items-center space-x-2 bg-orange-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-orange-700 transition-all shadow-lg shadow-orange-200"
+                >
+                  <Plus className="h-5 w-5" />
+                  <span>Añadir Empleado</span>
+                </button>
+              </div>
+
+              <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider font-bold">
+                      <th className="px-6 py-4">Nombre</th>
+                      <th className="px-6 py-4">Email</th>
+                      <th className="px-6 py-4">Rol</th>
+                      <th className="px-6 py-4 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {staff.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-6 py-12 text-center text-gray-400">No hay empleados registrados.</td>
+                      </tr>
+                    ) : (
+                      staff.map(s => (
+                        <tr key={s.id} className="hover:bg-gray-50/50 transition-all">
+                          <td className="px-6 py-4 font-bold text-gray-900">{s.name}</td>
+                          <td className="px-6 py-4 text-gray-600">{s.email}</td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "px-3 py-1 rounded-full text-xs font-bold",
+                              s.role === 'admin' ? "bg-purple-100 text-purple-600" : "bg-blue-100 text-blue-600"
+                            )}>
+                              {s.role === 'admin' ? 'Administrador' : 'Vendedor'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <button 
+                              onClick={async () => {
+                                if (window.confirm("¿Eliminar empleado?")) {
+                                  await deleteDoc(doc(db, "businesses", business.id, "staff", s.id));
+                                }
+                              }}
+                              className="p-2 text-gray-400 hover:text-red-600 transition-all"
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          )}
         </div>
       </main>
 
@@ -1328,6 +1586,12 @@ export default function AdminPanel() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Notas del Cliente</label>
                     <textarea name="notes" defaultValue={isEditingCustomer?.notes} placeholder="Preferencias, alergias, etc." className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500" />
                   </div>
+                  {isAddingCustomer && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Referido por (Teléfono)</label>
+                      <input type="tel" name="referredBy" placeholder="Teléfono del cliente que lo recomendó" className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500" />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
                     <select name="status" defaultValue={isEditingCustomer?.status || 'active'} className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500">
