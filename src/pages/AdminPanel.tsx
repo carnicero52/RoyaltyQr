@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy, deleteDoc, addDoc, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy, deleteDoc, addDoc, where, onSnapshot } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { Business, Customer, Purchase } from "../types";
 import { 
@@ -35,20 +35,15 @@ export default function AdminPanel() {
   const qrRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    try {
-      // Fetch Business
-      const businessDoc = await getDoc(doc(db, "businesses", uid));
-      if (businessDoc.exists()) {
-        setBusiness({ id: businessDoc.id, ...businessDoc.data() } as Business);
+    // Real-time Business Config
+    const unsubBusiness = onSnapshot(doc(db, "businesses", uid), async (docSnap) => {
+      if (docSnap.exists()) {
+        setBusiness({ id: docSnap.id, ...docSnap.data() } as Business);
       } else {
-        // Create default business
+        // Create default business if it doesn't exist
         const defaultBusiness: Business = {
           id: uid,
           name: "My Business",
@@ -61,23 +56,28 @@ export default function AdminPanel() {
         await setDoc(doc(db, "businesses", uid), defaultBusiness);
         setBusiness(defaultBusiness);
       }
-
-      // Fetch Customers
-      const customersSnap = await getDocs(collection(db, "businesses", uid, "customers"));
-      const customersList = customersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Customer));
-      setCustomers(customersList);
-
-      // Fetch Purchases
-      const purchasesSnap = await getDocs(query(collection(db, "businesses", uid, "purchases"), orderBy("timestamp", "desc")));
-      const purchasesList = purchasesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Purchase));
-      setPurchases(purchasesList);
-
-    } catch (err) {
-      console.error("Error fetching data:", err);
-    } finally {
       setLoading(false);
-    }
-  };
+    });
+
+    // Real-time Customers
+    const unsubCustomers = onSnapshot(collection(db, "businesses", uid, "customers"), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Customer));
+      setCustomers(list);
+    });
+
+    // Real-time Purchases
+    const qPurchases = query(collection(db, "businesses", uid, "purchases"), orderBy("timestamp", "desc"));
+    const unsubPurchases = onSnapshot(qPurchases, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Purchase));
+      setPurchases(list);
+    });
+
+    return () => {
+      unsubBusiness();
+      unsubCustomers();
+      unsubPurchases();
+    };
+  }, []);
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,7 +101,15 @@ export default function AdminPanel() {
     const name = formData.get("name") as string;
     const email = formData.get("email") as string;
 
-    if (!phone) return;
+    if (!phone || phone.length < 8) {
+      alert("Please enter a valid phone number.");
+      return;
+    }
+
+    if (customers.some(c => c.phone === phone)) {
+      alert("A customer with this phone number already exists.");
+      return;
+    }
 
     try {
       const newCust: Customer = {
@@ -113,7 +121,7 @@ export default function AdminPanel() {
         businessId: business!.id,
       };
       await setDoc(doc(db, "businesses", business!.id, "customers", phone), newCust);
-      setCustomers([...customers, newCust]);
+      setSearchTerm("");
       setIsAddingCustomer(false);
     } catch (err) {
       console.error("Error adding customer:", err);
@@ -131,7 +139,6 @@ export default function AdminPanel() {
     try {
       const updated = { ...isEditingCustomer, name, email, couponsCount };
       await updateDoc(doc(db, "businesses", business!.id, "customers", isEditingCustomer.id), updated);
-      setCustomers(customers.map(c => c.id === isEditingCustomer.id ? updated : c));
       setIsEditingCustomer(null);
     } catch (err) {
       console.error("Error updating customer:", err);
@@ -142,7 +149,6 @@ export default function AdminPanel() {
     if (!window.confirm("Are you sure you want to delete this customer?")) return;
     try {
       await deleteDoc(doc(db, "businesses", business!.id, "customers", id));
-      setCustomers(customers.filter(c => c.id !== id));
     } catch (err) {
       console.error("Error deleting customer:", err);
     }
@@ -565,37 +571,56 @@ export default function AdminPanel() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {filteredCustomers.map(c => (
-                        <tr key={c.id} className="hover:bg-gray-50/50 transition-all">
-                          <td className="px-6 py-4">
-                            <div className="flex items-center space-x-3">
-                              <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">
-                                {c.name ? c.name[0].toUpperCase() : "?"}
-                              </div>
-                              <div>
-                                <p className="font-bold text-gray-900">{c.name || "Unnamed Customer"}</p>
-                                <p className="text-xs text-gray-500">{c.phone}</p>
-                              </div>
+                      {filteredCustomers.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-12 text-center">
+                            <div className="flex flex-col items-center justify-center text-gray-400">
+                              <Search className="h-10 w-10 mb-2 opacity-20" />
+                              <p className="font-medium">No customers found</p>
+                              {searchTerm && (
+                                <button 
+                                  onClick={() => setSearchTerm("")}
+                                  className="mt-2 text-sm text-orange-600 hover:underline"
+                                >
+                                  Clear search
+                                </button>
+                              )}
                             </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center space-x-2">
-                              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-orange-500" style={{ width: `${(c.couponsCount / (business?.couponsNeeded || 10)) * 100}%` }}></div>
-                              </div>
-                              <span className="text-sm font-bold text-gray-700">{c.couponsCount}/{business?.couponsNeeded}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-500">
-                            {c.lastPurchaseAt ? format(new Date(c.lastPurchaseAt), "MMM dd, HH:mm") : "Never"}
-                          </td>
-                          <td className="px-6 py-4 text-right space-x-2">
-                            <button onClick={() => fetchCustomerHistory(c.id)} className="p-2 text-gray-400 hover:text-blue-600 transition-all"><History className="h-5 w-5" /></button>
-                            <button onClick={() => setIsEditingCustomer(c)} className="p-2 text-gray-400 hover:text-orange-600 transition-all"><Edit2 className="h-5 w-5" /></button>
-                            <button onClick={() => handleDeleteCustomer(c.id)} className="p-2 text-gray-400 hover:text-red-600 transition-all"><Trash2 className="h-5 w-5" /></button>
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        filteredCustomers.map(c => (
+                          <tr key={c.id} className="hover:bg-gray-50/50 transition-all">
+                            <td className="px-6 py-4">
+                              <div className="flex items-center space-x-3">
+                                <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">
+                                  {c.name ? c.name[0].toUpperCase() : "?"}
+                                </div>
+                                <div>
+                                  <p className="font-bold text-gray-900">{c.name || "Unnamed Customer"}</p>
+                                  <p className="text-xs text-gray-500">{c.phone}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center space-x-2">
+                                <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-orange-500" style={{ width: `${(c.couponsCount / (business?.couponsNeeded || 10)) * 100}%` }}></div>
+                                </div>
+                                <span className="text-sm font-bold text-gray-700">{c.couponsCount}/{business?.couponsNeeded}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500">
+                              {c.lastPurchaseAt ? format(new Date(c.lastPurchaseAt), "MMM dd, HH:mm") : "Never"}
+                            </td>
+                            <td className="px-6 py-4 text-right space-x-2">
+                              <button onClick={() => fetchCustomerHistory(c.id)} className="p-2 text-gray-400 hover:text-blue-600 transition-all"><History className="h-5 w-5" /></button>
+                              <button onClick={() => setIsEditingCustomer(c)} className="p-2 text-gray-400 hover:text-orange-600 transition-all"><Edit2 className="h-5 w-5" /></button>
+                              <button onClick={() => handleDeleteCustomer(c.id)} className="p-2 text-gray-400 hover:text-red-600 transition-all"><Trash2 className="h-5 w-5" /></button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
