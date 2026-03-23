@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "business": {
+      "title": "Business",
+      "description": "Configuration and details for a business loyalty program.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the business." },
+        "rewardDescription": { "type": "string", "description": "Description of the reward (e.g., 'Free Coffee')." },
+        "couponsNeeded": { "type": "integer", "description": "Number of coupons required for a reward." },
+        "cooldownHours": { "type": "integer", "description": "Minimum hours between purchases." },
+        "ownerEmail": { "type": "string", "description": "Email of the business owner." },
+        "telegramChatId": { "type": "string", "description": "Telegram chat ID for notifications." },
+        "notificationsEnabled": { "type": "boolean", "description": "Whether notifications are enabled." }
+      },
+      "required": ["name", "rewardDescription", "couponsNeeded", "cooldownHours"]
+    },
+    "customer": {
+      "title": "Customer",
+      "description": "Information about a customer participating in the loyalty program.",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string", "description": "Customer's phone number (unique identifier)." },
+        "name": { "type": "string", "description": "Customer's name." },
+        "email": { "type": "string", "description": "Customer's email (optional)." },
+        "couponsCount": { "type": "integer", "description": "Current number of coupons accumulated." },
+        "lastPurchaseAt": { "type": "string", "format": "date-time", "description": "Timestamp of the last purchase." },
+        "businessId": { "type": "string", "description": "ID of the business the customer belongs to." }
+      },
+      "required": ["phone", "businessId"]
+    },
+    "purchase": {
+      "title": "Purchase",
+      "description": "A record of a single purchase by a customer.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string", "description": "ID of the customer who made the purchase." },
+        "businessId": { "type": "string", "description": "ID of the business where the purchase was made." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the purchase occurred." }
+      },
+      "required": ["customerId", "businessId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/businesses/{businessId}": {
+      "schema": "business",
+      "description": "Business configuration."
+    },
+    "/businesses/{businessId}/customers/{customerId}": {
+      "schema": "customer",
+      "description": "Customers for a specific business."
+    },
+    "/businesses/{businessId}/purchases/{purchaseId}": {
+      "schema": "purchase",
+      "description": "Purchase history for a specific business."
+    }
+  }
+}
