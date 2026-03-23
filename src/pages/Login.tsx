@@ -15,7 +15,7 @@ export default function Login() {
       await signInWithPopup(auth, provider);
     } catch (err: any) {
       console.error("Login error:", err);
-      setError("Failed to sign in. Please check your connection.");
+      setError(err.message || "Error al iniciar sesión. Por favor, comprueba tu conexión.");
     } finally {
       setLoading(false);
     }
@@ -33,7 +33,7 @@ export default function Login() {
           Fideliza Admin
         </h2>
         <p className="mt-2 text-center text-sm text-gray-600">
-          Manage your loyalty program and rewards.
+          Gestiona tu programa de fidelización y recompensas.
         </p>
       </div>
 
@@ -50,7 +50,7 @@ export default function Login() {
               ) : (
                 <>
                   <LogIn className="w-5 h-5 mr-2" />
-                  Sign in with Google
+                  Iniciar sesión con Google
                 </>
               )}
             </button>

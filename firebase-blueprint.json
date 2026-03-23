@@ -6,12 +6,18 @@
       "type": "object",
       "properties": {
         "name": { "type": "string", "description": "Name of the business." },
+        "slogan": { "type": "string", "description": "Business slogan or catchphrase." },
+        "description": { "type": "string", "description": "Detailed description of the business." },
+        "rewardLongDescription": { "type": "string", "description": "Detailed description of the reward." },
+        "logoUrl": { "type": "string", "description": "URL to the business logo image." },
         "rewardDescription": { "type": "string", "description": "Description of the reward (e.g., 'Free Coffee')." },
+        "rewardImageUrl": { "type": "string", "description": "URL to the reward image." },
         "couponsNeeded": { "type": "integer", "description": "Number of coupons required for a reward." },
         "cooldownHours": { "type": "integer", "description": "Minimum hours between purchases." },
         "ownerEmail": { "type": "string", "description": "Email of the business owner." },
         "telegramChatId": { "type": "string", "description": "Telegram chat ID for notifications." },
-        "notificationsEnabled": { "type": "boolean", "description": "Whether notifications are enabled." }
+        "notificationsEnabled": { "type": "boolean", "description": "Whether notifications are enabled." },
+        "currency": { "type": "string", "description": "Currency code (e.g., 'USD', 'ARS')." }
       },
       "required": ["name", "rewardDescription", "couponsNeeded", "cooldownHours"]
     },
@@ -23,7 +29,10 @@
         "phone": { "type": "string", "description": "Customer's phone number (unique identifier)." },
         "name": { "type": "string", "description": "Customer's name." },
         "email": { "type": "string", "description": "Customer's email (optional)." },
+        "notes": { "type": "string", "description": "Internal notes about the customer." },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Customer status." },
         "couponsCount": { "type": "integer", "description": "Current number of coupons accumulated." },
+        "totalSpent": { "type": "number", "description": "Total amount spent by the customer." },
         "lastPurchaseAt": { "type": "string", "format": "date-time", "description": "Timestamp of the last purchase." },
         "businessId": { "type": "string", "description": "ID of the business the customer belongs to." }
       },
@@ -36,6 +45,9 @@
       "properties": {
         "customerId": { "type": "string", "description": "ID of the customer who made the purchase." },
         "businessId": { "type": "string", "description": "ID of the business where the purchase was made." },
+        "amount": { "type": "number", "description": "Amount of the purchase." },
+        "paymentMethod": { "type": "string", "description": "Method of payment (e.g., 'Cash', 'Card')." },
+        "notes": { "type": "string", "description": "Notes about the purchase." },
         "timestamp": { "type": "string", "format": "date-time", "description": "When the purchase occurred." }
       },
       "required": ["customerId", "businessId", "timestamp"]

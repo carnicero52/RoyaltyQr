@@ -5,8 +5,18 @@ import cors from "cors";
 import nodemailer from "nodemailer";
 import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
+import admin from "firebase-admin";
 
 dotenv.config();
+
+// Initialize Firebase Admin
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.applicationDefault(),
+  });
+}
+
+const db = admin.firestore();
 
 const app = express();
 
@@ -25,36 +35,45 @@ async function startServer() {
     },
   });
 
-  // Telegram Bot
-  const bot = process.env.TELEGRAM_BOT_TOKEN 
-    ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false })
-    : null;
-
   // API Routes
   app.post("/api/notify", async (req, res) => {
-    const { type, data, config } = req.body;
+    const { type, data, config, message: customMessage, subject: customSubject, toEmail, toPhone, toTelegram } = req.body;
     
-    const message = `
+    const message = customMessage || `
       🔔 Fideliza Notification: ${type}
       
       Details:
       ${JSON.stringify(data, null, 2)}
     `;
 
+    const subject = customSubject || `Fideliza: ${type}`;
+
     try {
       // Email Notification
-      if (config.email && process.env.GMAIL_USER) {
+      if (config.email && (toEmail || config.email) && process.env.GMAIL_USER) {
         await transporter.sendMail({
           from: process.env.GMAIL_USER,
-          to: config.email,
-          subject: `Fideliza: ${type}`,
+          to: toEmail || config.email,
+          subject: subject,
           text: message,
         });
       }
 
       // Telegram Notification
-      if (config.telegram && bot && process.env.TELEGRAM_CHAT_ID) {
-        await bot.sendMessage(process.env.TELEGRAM_CHAT_ID, message);
+      if (config.telegram && (toTelegram || config.telegramChatId || process.env.TELEGRAM_CHAT_ID)) {
+        const token = config.telegramToken || process.env.TELEGRAM_BOT_TOKEN;
+        const chatId = toTelegram || config.telegramChatId || process.env.TELEGRAM_CHAT_ID;
+        if (token && chatId) {
+          const tBot = new TelegramBot(token, { polling: false });
+          await tBot.sendMessage(chatId, message);
+        }
+      }
+
+      // WhatsApp Notification (CallMeBot)
+      if (config.whatsapp && (toPhone || config.whatsappPhone) && config.whatsappApiKey) {
+        const phone = toPhone || config.whatsappPhone;
+        const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${config.whatsappApiKey}`;
+        await fetch(url);
       }
 
       res.json({ success: true });
@@ -63,6 +82,74 @@ async function startServer() {
       res.status(500).json({ error: "Failed to send notification" });
     }
   });
+
+  // Simple Scheduler for Reminders
+  setInterval(async () => {
+    const now = new Date().toISOString();
+    try {
+      const remindersSnapshot = await db.collectionGroup("reminders")
+        .where("status", "==", "pending")
+        .where("scheduledAt", "<=", now)
+        .get();
+
+      for (const doc of remindersSnapshot.docs) {
+        const reminder = doc.data();
+        const businessDoc = await db.collection("businesses").doc(reminder.businessId).get();
+        const business = businessDoc.data();
+
+        if (!business) continue;
+
+        const config = {
+          email: business.ownerEmail,
+          telegram: !!business.telegramChatId,
+          telegramToken: business.telegramToken,
+          telegramChatId: business.telegramChatId,
+          whatsapp: !!business.whatsappEnabled,
+          whatsappPhone: business.whatsappPhone,
+          whatsappApiKey: business.whatsappApiKey,
+        };
+
+        // If reminder has specific customers, send to them
+        if (reminder.customerIds && reminder.customerIds.length > 0) {
+          for (const customerId of reminder.customerIds) {
+            const customerDoc = await db.collection("businesses").doc(reminder.businessId).collection("customers").doc(customerId).get();
+            const customer = customerDoc.data();
+            if (customer) {
+              await fetch(`http://localhost:${PORT}/api/notify`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
+                  message: reminder.message,
+                  subject: reminder.subject,
+                  config,
+                  toEmail: customer.email,
+                  toPhone: customer.phone,
+                }),
+              });
+            }
+          }
+        } else {
+          // Send to business owner if no specific customers
+          await fetch(`http://localhost:${PORT}/api/notify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
+              message: reminder.message,
+              subject: reminder.subject,
+              config,
+            }),
+          });
+        }
+
+        // Update status
+        await doc.ref.update({ status: "sent" });
+      }
+    } catch (error) {
+      console.error("Scheduler error:", error);
+    }
+  }, 60000); // Check every minute
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {

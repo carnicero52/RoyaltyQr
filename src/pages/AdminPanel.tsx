@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy, deleteDoc, addDoc, where, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy, deleteDoc, addDoc, where, onSnapshot, increment } from "firebase/firestore";
 import { db, auth } from "../firebase";
-import { Business, Customer, Purchase } from "../types";
+import { Business, Customer, Purchase, Reminder } from "../types";
 import { 
   Settings, Users, QrCode, BarChart3, LogOut, Save, Plus, Search, 
   Edit2, Trash2, Download, FileText, Mail, Send, Bell, Gift,
-  CheckCircle2, AlertCircle, TrendingUp, UserPlus, History, X,
-  CreditCard, Megaphone, Calendar, MessageSquare
+  CheckCircle2, AlertCircle, TrendingUp, UserPlus, History, X, PlusCircle,
+  CreditCard, Megaphone, Calendar, MessageSquare, Clock, User, Check
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { 
@@ -16,11 +16,12 @@ import {
 import { jsPDF } from "jspdf";
 import "jspdf-autotable";
 import { format } from "date-fns";
+import { es } from "date-fns/locale";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<"config" | "customers" | "qr" | "stats" | "billing" | "marketing">("config");
+  const [activeTab, setActiveTab] = useState<"config" | "customers" | "qr" | "stats" | "billing" | "marketing" | "rewards">("config");
   const [business, setBusiness] = useState<Business | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -31,6 +32,15 @@ export default function AdminPanel() {
   const [isAddingCustomer, setIsAddingCustomer] = useState(false);
   const [showHistory, setShowHistory] = useState<string | null>(null);
   const [customerHistory, setCustomerHistory] = useState<Purchase[]>([]);
+  const [isAddingPurchase, setIsAddingPurchase] = useState<string | null>(null);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
+  const [reminderForm, setReminderForm] = useState({
+    subject: "",
+    message: "",
+    scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    type: "marketing" as "billing" | "marketing"
+  });
 
   const qrRef = useRef<HTMLDivElement>(null);
 
@@ -46,8 +56,8 @@ export default function AdminPanel() {
         // Create default business if it doesn't exist
         const defaultBusiness: Business = {
           id: uid,
-          name: "My Business",
-          rewardDescription: "Free Coffee",
+          name: "Mi Negocio",
+          rewardDescription: "Café Gratis",
           couponsNeeded: 10,
           cooldownHours: 2,
           notificationsEnabled: false,
@@ -72,12 +82,48 @@ export default function AdminPanel() {
       setPurchases(list);
     });
 
+    // Real-time Reminders
+    const qReminders = query(collection(db, "businesses", uid, "reminders"), orderBy("scheduledAt", "desc"));
+    const unsubReminders = onSnapshot(qReminders, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Reminder));
+      setReminders(list);
+    });
+
     return () => {
       unsubBusiness();
       unsubCustomers();
       unsubPurchases();
+      unsubReminders();
     };
   }, []);
+
+  const handleScheduleReminder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!business) return;
+    setSaving(true);
+    try {
+      const reminderData: Omit<Reminder, 'id'> = {
+        businessId: business.id,
+        ...reminderForm,
+        customerIds: selectedCustomers,
+        status: "pending"
+      };
+      await addDoc(collection(db, "businesses", business.id, "reminders"), reminderData);
+      alert("¡Recordatorio programado con éxito!");
+      setReminderForm({
+        subject: "",
+        message: "",
+        scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        type: "marketing"
+      });
+      setSelectedCustomers([]);
+    } catch (err) {
+      console.error("Error scheduling reminder:", err);
+      alert("Error al programar el recordatorio.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,7 +131,7 @@ export default function AdminPanel() {
     setSaving(true);
     try {
       await updateDoc(doc(db, "businesses", business.id), { ...business });
-      alert("Configuration saved successfully!");
+      alert("¡Configuración guardada con éxito!");
     } catch (err) {
       console.error("Error saving config:", err);
       alert("Failed to save configuration.");
@@ -100,6 +146,7 @@ export default function AdminPanel() {
     const phone = formData.get("phone") as string;
     const name = formData.get("name") as string;
     const email = formData.get("email") as string;
+    const notes = formData.get("notes") as string;
 
     if (!phone || phone.length < 8) {
       alert("Please enter a valid phone number.");
@@ -117,7 +164,10 @@ export default function AdminPanel() {
         phone,
         name,
         email,
+        notes,
+        status: 'active',
         couponsCount: 0,
+        totalSpent: 0,
         businessId: business!.id,
       };
       await setDoc(doc(db, "businesses", business!.id, "customers", phone), newCust);
@@ -134,14 +184,52 @@ export default function AdminPanel() {
     const formData = new FormData(e.currentTarget);
     const name = formData.get("name") as string;
     const email = formData.get("email") as string;
+    const notes = formData.get("notes") as string;
+    const status = formData.get("status") as 'active' | 'inactive';
     const couponsCount = parseInt(formData.get("couponsCount") as string);
 
     try {
-      const updated = { ...isEditingCustomer, name, email, couponsCount };
+      const updated = { ...isEditingCustomer, name, email, notes, status, couponsCount };
       await updateDoc(doc(db, "businesses", business!.id, "customers", isEditingCustomer.id), updated);
       setIsEditingCustomer(null);
     } catch (err) {
       console.error("Error updating customer:", err);
+    }
+  };
+
+  const handleAddPurchase = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!isAddingPurchase || !business) return;
+    const formData = new FormData(e.currentTarget);
+    const amount = parseFloat(formData.get("amount") as string) || 0;
+    const paymentMethod = formData.get("paymentMethod") as string;
+    const notes = formData.get("notes") as string;
+
+    try {
+      const now = new Date().toISOString();
+      const customerRef = doc(db, "businesses", business.id, "customers", isAddingPurchase);
+      
+      // Update Customer
+      await updateDoc(customerRef, {
+        couponsCount: increment(1),
+        totalSpent: increment(amount),
+        lastPurchaseAt: now,
+      });
+
+      // Record Purchase
+      await addDoc(collection(db, "businesses", business.id, "purchases"), {
+        customerId: isAddingPurchase,
+        businessId: business.id,
+        amount,
+        paymentMethod,
+        notes,
+        timestamp: now,
+      });
+
+      setIsAddingPurchase(null);
+      alert("Sello y cobro registrado con éxito!");
+    } catch (err) {
+      console.error("Error adding purchase:", err);
     }
   };
 
@@ -187,7 +275,7 @@ export default function AdminPanel() {
           }),
         });
       }
-      alert("Notifications sent successfully!");
+      alert("¡Notificaciones enviadas con éxito!");
     } catch (err) {
       console.error("Error sending bulk notifications:", err);
       alert("Failed to send some notifications.");
@@ -216,7 +304,7 @@ export default function AdminPanel() {
   };
 
   const exportToCSV = () => {
-    const headers = ["Phone", "Name", "Email", "Coupons", "Last Purchase"];
+    const headers = ["Teléfono", "Nombre", "Email", "Cupones", "Última Compra"];
     const rows = customers.map(c => [
       c.phone,
       c.name || "",
@@ -234,10 +322,10 @@ export default function AdminPanel() {
 
   const exportToPDF = () => {
     const doc = new jsPDF();
-    doc.text("Customer List - Fideliza", 14, 15);
+    doc.text("Lista de Clientes - Fideliza", 14, 15);
     (doc as any).autoTable({
       startY: 20,
-      head: [["Phone", "Name", "Email", "Coupons", "Last Purchase"]],
+      head: [["Teléfono", "Nombre", "Email", "Cupones", "Última Compra"]],
       body: customers.map(c => [
         c.phone,
         c.name || "",
@@ -271,7 +359,7 @@ export default function AdminPanel() {
   };
 
   const chartData = purchases.reduce((acc: any[], p) => {
-    const date = format(new Date(p.timestamp), "MMM dd");
+    const date = format(new Date(p.timestamp), "dd MMM", { locale: es });
     const existing = acc.find(a => a.date === date);
     if (existing) existing.count++;
     else acc.push({ date, count: 1 });
@@ -279,8 +367,8 @@ export default function AdminPanel() {
   }, []).reverse().slice(-7);
 
   const pieData = [
-    { name: "Progressing", value: customers.length - stats.rewardsReached },
-    { name: "Reward Reached", value: stats.rewardsReached },
+    { name: "En Progreso", value: customers.length - stats.rewardsReached },
+    { name: "Premio Alcanzado", value: stats.rewardsReached },
   ];
 
   const COLORS = ["#f97316", "#22c55e"];
@@ -289,14 +377,21 @@ export default function AdminPanel() {
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col">
-        <div className="p-6">
-          <div className="flex items-center space-x-3">
-            <div className="bg-orange-600 p-2 rounded-xl">
-              <CheckCircle2 className="h-6 w-6 text-white" />
+          <div className="p-6">
+            <div className="flex items-center space-x-3">
+              <div className="h-10 w-10 bg-orange-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-orange-200 overflow-hidden">
+                {business?.logoUrl ? (
+                  <img src={business.logoUrl} alt="Logo" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <CheckCircle2 className="h-6 w-6" />
+                )}
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">{business?.name || "Fideliza"}</h1>
+                {business?.slogan && <p className="text-[9px] text-gray-400 uppercase font-bold tracking-widest truncate w-32">{business.slogan}</p>}
+              </div>
             </div>
-            <span className="text-xl font-bold text-gray-900">Fideliza</span>
           </div>
-        </div>
 
         <nav className="flex-1 px-4 space-y-2 mt-4">
           <button
@@ -307,7 +402,17 @@ export default function AdminPanel() {
             )}
           >
             <Settings className="h-5 w-5" />
-            <span className="font-medium">Configuration</span>
+            <span className="font-medium">Negocio</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("rewards")}
+            className={cn(
+              "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
+              activeTab === "rewards" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+            )}
+          >
+            <Gift className="h-5 w-5" />
+            <span className="font-medium">Recompensas</span>
           </button>
           <button
             onClick={() => setActiveTab("customers")}
@@ -317,7 +422,7 @@ export default function AdminPanel() {
             )}
           >
             <Users className="h-5 w-5" />
-            <span className="font-medium">Customers</span>
+            <span className="font-medium">Clientes</span>
           </button>
           <button
             onClick={() => setActiveTab("qr")}
@@ -327,7 +432,7 @@ export default function AdminPanel() {
             )}
           >
             <QrCode className="h-5 w-5" />
-            <span className="font-medium">QR Management</span>
+            <span className="font-medium">Gestión QR</span>
           </button>
           <button
             onClick={() => setActiveTab("stats")}
@@ -337,10 +442,10 @@ export default function AdminPanel() {
             )}
           >
             <BarChart3 className="h-5 w-5" />
-            <span className="font-medium">Statistics</span>
+            <span className="font-medium">Estadísticas</span>
           </button>
           <div className="pt-4 pb-2 px-4">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Communications</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Comunicaciones</p>
           </div>
           <button
             onClick={() => setActiveTab("billing")}
@@ -370,7 +475,7 @@ export default function AdminPanel() {
             className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 transition-all"
           >
             <LogOut className="h-5 w-5" />
-            <span className="font-medium">Log Out</span>
+            <span className="font-medium">Cerrar Sesión</span>
           </button>
         </div>
       </aside>
@@ -400,70 +505,82 @@ export default function AdminPanel() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Program Configuration</h1>
-                  <p className="text-gray-500 mt-1">Customize your loyalty program rules.</p>
+                  <h1 className="text-3xl font-bold text-gray-900">Perfil del Negocio</h1>
+                  <p className="text-gray-500 mt-1">Configura la identidad de tu marca.</p>
                 </div>
                 <button
                   onClick={handleSaveConfig}
                   disabled={saving}
                   className="flex items-center space-x-2 bg-orange-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-orange-700 transition-all disabled:opacity-50"
                 >
-                  {saving ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : <><Save className="h-5 w-5" /><span>Save Changes</span></>}
+                  {saving ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : <><Save className="h-5 w-5" /><span>Guardar Cambios</span></>}
                 </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
-                  <h2 className="text-xl font-bold flex items-center space-x-2"><Gift className="h-5 w-5 text-orange-600" /><span>Reward Details</span></h2>
+                  <h2 className="text-xl font-bold flex items-center space-x-2"><Settings className="h-5 w-5 text-orange-600" /><span>Información General</span></h2>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Business Name</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Negocio</label>
                       <input
                         type="text"
                         value={business.name}
                         onChange={e => setBusiness({ ...business, name: e.target.value })}
                         className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        placeholder="Ej: Café Central"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Reward Description</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Eslogan / Frase corta</label>
                       <input
                         type="text"
-                        value={business.rewardDescription}
-                        onChange={e => setBusiness({ ...business, rewardDescription: e.target.value })}
+                        value={business.slogan || ""}
+                        onChange={e => setBusiness({ ...business, slogan: e.target.value })}
                         className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        placeholder="Ej: El mejor café de la ciudad"
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Coupons Needed</label>
-                        <input
-                          type="number"
-                          value={business.couponsNeeded}
-                          onChange={e => setBusiness({ ...business, couponsNeeded: parseInt(e.target.value) })}
-                          className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Cooldown (Hours)</label>
-                        <input
-                          type="number"
-                          value={business.cooldownHours}
-                          onChange={e => setBusiness({ ...business, cooldownHours: parseInt(e.target.value) })}
-                          className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Descripción del Negocio</label>
+                      <textarea
+                        value={business.description || ""}
+                        onChange={e => setBusiness({ ...business, description: e.target.value })}
+                        rows={3}
+                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        placeholder="Cuéntale a tus clientes sobre tu negocio..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">URL del Logo</label>
+                      <input
+                        type="text"
+                        value={business.logoUrl || ""}
+                        onChange={e => setBusiness({ ...business, logoUrl: e.target.value })}
+                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        placeholder="https://ejemplo.com/logo.png"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Moneda</label>
+                      <input
+                        type="text"
+                        value={business.currency || "USD"}
+                        onChange={e => setBusiness({ ...business, currency: e.target.value })}
+                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        placeholder="USD, ARS, EUR..."
+                      />
                     </div>
                   </div>
                 </div>
 
                 <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
-                  <h2 className="text-xl font-bold flex items-center space-x-2"><Bell className="h-5 w-5 text-orange-600" /><span>Notifications</span></h2>
+                  <h2 className="text-xl font-bold flex items-center space-x-2"><Bell className="h-5 w-5 text-orange-600" /><span>Notificaciones y Contacto</span></h2>
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
                       <div>
-                        <p className="font-bold text-gray-900">Enable Notifications</p>
-                        <p className="text-xs text-gray-500">Receive alerts for new stamps and rewards.</p>
+                        <p className="font-bold text-gray-900">Notificaciones de Actividad</p>
+                        <p className="text-xs text-gray-500">Alertas por nuevos sellos y premios.</p>
                       </div>
                       <button
                         onClick={() => setBusiness({ ...business, notificationsEnabled: !business.notificationsEnabled })}
@@ -475,44 +592,13 @@ export default function AdminPanel() {
                         <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", business.notificationsEnabled ? "right-1" : "left-1")}></div>
                       </button>
                     </div>
-                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                      <div>
-                        <p className="font-bold text-gray-900">Billing Alerts</p>
-                        <p className="text-xs text-gray-500">Automated payment reminders.</p>
-                      </div>
-                      <button
-                        onClick={() => setBusiness({ ...business, billingNotificationsEnabled: !business.billingNotificationsEnabled })}
-                        className={cn(
-                          "w-12 h-6 rounded-full transition-all relative",
-                          business.billingNotificationsEnabled ? "bg-orange-600" : "bg-gray-300"
-                        )}
-                      >
-                        <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", business.billingNotificationsEnabled ? "right-1" : "left-1")}></div>
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                      <div>
-                        <p className="font-bold text-gray-900">Marketing Alerts</p>
-                        <p className="text-xs text-gray-500">Promotions and special dates.</p>
-                      </div>
-                      <button
-                        onClick={() => setBusiness({ ...business, marketingNotificationsEnabled: !business.marketingNotificationsEnabled })}
-                        className={cn(
-                          "w-12 h-6 rounded-full transition-all relative",
-                          business.marketingNotificationsEnabled ? "bg-orange-600" : "bg-gray-300"
-                        )}
-                      >
-                        <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", business.marketingNotificationsEnabled ? "right-1" : "left-1")}></div>
-                      </button>
-                    </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center space-x-2"><Mail className="h-4 w-4" /><span>Admin Email (Gmail)</span></label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center space-x-2"><Mail className="h-4 w-4" /><span>Email de Administrador</span></label>
                       <input
                         type="email"
                         value={business.ownerEmail}
                         onChange={e => setBusiness({ ...business, ownerEmail: e.target.value })}
                         className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
-                        placeholder="your-email@gmail.com"
                       />
                     </div>
                     <div>
@@ -522,7 +608,132 @@ export default function AdminPanel() {
                         value={business.telegramChatId}
                         onChange={e => setBusiness({ ...business, telegramChatId: e.target.value })}
                         className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
-                        placeholder="Chat ID"
+                        placeholder="ID de chat para alertas"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+                      <div>
+                        <p className="font-bold text-gray-900">WhatsApp (CallMeBot)</p>
+                        <p className="text-xs text-gray-500">Recibe alertas vía WhatsApp.</p>
+                      </div>
+                      <button
+                        onClick={() => setBusiness({ ...business, whatsappEnabled: !business.whatsappEnabled })}
+                        className={cn(
+                          "w-12 h-6 rounded-full transition-all relative",
+                          business.whatsappEnabled ? "bg-green-500" : "bg-gray-300"
+                        )}
+                      >
+                        <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", business.whatsappEnabled ? "right-1" : "left-1")}></div>
+                      </button>
+                    </div>
+
+                    {business.whatsappEnabled && (
+                      <div className="space-y-4 pt-2">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Número de WhatsApp</label>
+                          <input
+                            type="text"
+                            value={business.whatsappPhone || ""}
+                            onChange={e => setBusiness({ ...business, whatsappPhone: e.target.value })}
+                            className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                            placeholder="+34600000000"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">API Key de CallMeBot</label>
+                          <input
+                            type="text"
+                            value={business.whatsappApiKey || ""}
+                            onChange={e => setBusiness({ ...business, whatsappApiKey: e.target.value })}
+                            className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                            placeholder="Tu API Key"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Rewards Tab */}
+          {activeTab === "rewards" && business && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">Configuración de Recompensas</h1>
+                  <p className="text-gray-500 mt-1">Define qué ganan tus clientes y cómo.</p>
+                </div>
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={saving}
+                  className="flex items-center space-x-2 bg-orange-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-orange-700 transition-all disabled:opacity-50"
+                >
+                  {saving ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : <><Save className="h-5 w-5" /><span>Guardar Cambios</span></>}
+                </button>
+              </div>
+
+              <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 max-w-2xl">
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Título del Premio</label>
+                    <input
+                      type="text"
+                      value={business.rewardDescription}
+                      onChange={e => setBusiness({ ...business, rewardDescription: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                      placeholder="Ej: Café Gratis"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Descripción del Negocio</label>
+                    <textarea
+                      value={business.description || ""}
+                      onChange={e => setBusiness({ ...business, description: e.target.value })}
+                      rows={2}
+                      className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                      placeholder="Breve descripción de tu negocio..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Descripción Detallada del Premio</label>
+                    <textarea
+                      value={business.rewardLongDescription || ""}
+                      onChange={e => setBusiness({ ...business, rewardLongDescription: e.target.value })}
+                      rows={3}
+                      className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                      placeholder="Explica detalladamente en qué consiste el premio..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">URL de la Imagen del Premio</label>
+                    <input
+                      type="text"
+                      value={business.rewardImageUrl || ""}
+                      onChange={e => setBusiness({ ...business, rewardImageUrl: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                      placeholder="https://ejemplo.com/premio.jpg"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Sellos Necesarios</label>
+                      <input
+                        type="number"
+                        value={business.couponsNeeded}
+                        onChange={e => setBusiness({ ...business, couponsNeeded: parseInt(e.target.value) })}
+                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Tiempo de Espera (Horas)</label>
+                      <input
+                        type="number"
+                        value={business.cooldownHours}
+                        onChange={e => setBusiness({ ...business, cooldownHours: parseInt(e.target.value) })}
+                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
                       />
                     </div>
                   </div>
@@ -536,13 +747,13 @@ export default function AdminPanel() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Customers</h1>
-                  <p className="text-gray-500 mt-1">Manage your customer base and their progress.</p>
+                  <h1 className="text-3xl font-bold text-gray-900">Clientes</h1>
+                  <p className="text-gray-500 mt-1">Gestiona tu base de clientes y su progreso.</p>
                 </div>
                 <div className="flex space-x-2">
                   <button onClick={exportToCSV} className="flex items-center space-x-2 bg-white border border-gray-200 px-4 py-2 rounded-xl text-gray-700 hover:bg-gray-50 transition-all font-medium"><Download className="h-4 w-4" /><span>CSV</span></button>
                   <button onClick={exportToPDF} className="flex items-center space-x-2 bg-white border border-gray-200 px-4 py-2 rounded-xl text-gray-700 hover:bg-gray-50 transition-all font-medium"><FileText className="h-4 w-4" /><span>PDF</span></button>
-                  <button onClick={() => setIsAddingCustomer(true)} className="flex items-center space-x-2 bg-orange-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-orange-700 transition-all"><Plus className="h-4 w-4" /><span>Add Customer</span></button>
+                  <button onClick={() => setIsAddingCustomer(true)} className="flex items-center space-x-2 bg-orange-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-orange-700 transition-all"><Plus className="h-4 w-4" /><span>Añadir Cliente</span></button>
                 </div>
               </div>
 
@@ -552,7 +763,7 @@ export default function AdminPanel() {
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                     <input
                       type="text"
-                      placeholder="Search by name, phone or email..."
+                      placeholder="Buscar por nombre, teléfono o email..."
                       value={searchTerm}
                       onChange={e => setSearchTerm(e.target.value)}
                       className="w-full pl-12 pr-4 py-3 rounded-2xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500 bg-white"
@@ -564,10 +775,10 @@ export default function AdminPanel() {
                   <table className="w-full text-left">
                     <thead>
                       <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider font-bold">
-                        <th className="px-6 py-4">Customer</th>
-                        <th className="px-6 py-4">Progress</th>
-                        <th className="px-6 py-4">Last Stamp</th>
-                        <th className="px-6 py-4 text-right">Actions</th>
+                        <th className="px-6 py-4">Cliente</th>
+                        <th className="px-6 py-4">Progreso</th>
+                        <th className="px-6 py-4">Último Sello</th>
+                        <th className="px-6 py-4 text-right">Acciones</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -576,13 +787,13 @@ export default function AdminPanel() {
                           <td colSpan={4} className="px-6 py-12 text-center">
                             <div className="flex flex-col items-center justify-center text-gray-400">
                               <Search className="h-10 w-10 mb-2 opacity-20" />
-                              <p className="font-medium">No customers found</p>
+                              <p className="font-medium">No se encontraron clientes</p>
                               {searchTerm && (
                                 <button 
                                   onClick={() => setSearchTerm("")}
                                   className="mt-2 text-sm text-orange-600 hover:underline"
                                 >
-                                  Clear search
+                                  Limpiar búsqueda
                                 </button>
                               )}
                             </div>
@@ -597,7 +808,7 @@ export default function AdminPanel() {
                                   {c.name ? c.name[0].toUpperCase() : "?"}
                                 </div>
                                 <div>
-                                  <p className="font-bold text-gray-900">{c.name || "Unnamed Customer"}</p>
+                                  <p className="font-bold text-gray-900">{c.name || "Cliente sin nombre"}</p>
                                   <p className="text-xs text-gray-500">{c.phone}</p>
                                 </div>
                               </div>
@@ -611,9 +822,10 @@ export default function AdminPanel() {
                               </div>
                             </td>
                             <td className="px-6 py-4 text-sm text-gray-500">
-                              {c.lastPurchaseAt ? format(new Date(c.lastPurchaseAt), "MMM dd, HH:mm") : "Never"}
+                              {c.lastPurchaseAt ? format(new Date(c.lastPurchaseAt), "dd MMM, HH:mm", { locale: es }) : "Nunca"}
                             </td>
                             <td className="px-6 py-4 text-right space-x-2">
+                              <button onClick={() => setIsAddingPurchase(c.id)} className="p-2 text-gray-400 hover:text-green-600 transition-all" title="Registrar Venta/Sello"><PlusCircle className="h-5 w-5" /></button>
                               <button onClick={() => fetchCustomerHistory(c.id)} className="p-2 text-gray-400 hover:text-blue-600 transition-all"><History className="h-5 w-5" /></button>
                               <button onClick={() => setIsEditingCustomer(c)} className="p-2 text-gray-400 hover:text-orange-600 transition-all"><Edit2 className="h-5 w-5" /></button>
                               <button onClick={() => handleDeleteCustomer(c.id)} className="p-2 text-gray-400 hover:text-red-600 transition-all"><Trash2 className="h-5 w-5" /></button>
@@ -632,8 +844,8 @@ export default function AdminPanel() {
           {activeTab === "qr" && business && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center space-y-8">
               <div className="text-center">
-                <h1 className="text-3xl font-bold text-gray-900">QR Code</h1>
-                <p className="text-gray-500 mt-1">Print this QR code for your customers to scan.</p>
+                <h1 className="text-3xl font-bold text-gray-900">Código QR</h1>
+                <p className="text-gray-500 mt-1">Imprime este código QR para que tus clientes lo escaneen.</p>
               </div>
 
               <div className="bg-white p-12 rounded-[3rem] shadow-2xl border border-gray-100 flex flex-col items-center space-y-8">
@@ -647,19 +859,19 @@ export default function AdminPanel() {
                 </div>
                 <div className="text-center">
                   <p className="text-lg font-bold text-gray-900">{business.name}</p>
-                  <p className="text-gray-500 text-sm">Scan to get rewards!</p>
+                  <p className="text-gray-500 text-sm">¡Escanea para obtener recompensas!</p>
                 </div>
                 <button
                   onClick={downloadQR}
                   className="flex items-center space-x-2 bg-orange-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all shadow-lg shadow-orange-200"
                 >
                   <Download className="h-6 w-6" />
-                  <span>Download QR Code</span>
+                  <span>Descargar Código QR</span>
                 </button>
               </div>
 
               <div className="max-w-md text-center text-gray-500 text-sm">
-                <p>Tip: Place this QR code near your cash register or on tables where customers can easily see it.</p>
+                <p>Consejo: Coloca este código QR cerca de tu caja registradora o en las mesas donde los clientes puedan verlo fácilmente.</p>
               </div>
             </motion.div>
           )}
@@ -667,7 +879,7 @@ export default function AdminPanel() {
           {/* Stats Tab */}
           {activeTab === "stats" && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
-              <h1 className="text-3xl font-bold text-gray-900">Statistics</h1>
+              <h1 className="text-3xl font-bold text-gray-900">Estadísticas</h1>
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
@@ -676,7 +888,7 @@ export default function AdminPanel() {
                     <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">Total</span>
                   </div>
                   <p className="text-3xl font-bold text-gray-900">{stats.totalCustomers}</p>
-                  <p className="text-sm text-gray-500">Customers</p>
+                  <p className="text-sm text-gray-500">Clientes</p>
                 </div>
                 <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                   <div className="flex items-center justify-between mb-4">
@@ -684,29 +896,29 @@ export default function AdminPanel() {
                     <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-lg">+12%</span>
                   </div>
                   <p className="text-3xl font-bold text-gray-900">{stats.totalPurchases}</p>
-                  <p className="text-sm text-gray-500">Total Stamps</p>
+                  <p className="text-sm text-gray-500">Sellos Totales</p>
                 </div>
                 <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                   <div className="flex items-center justify-between mb-4">
                     <div className="p-3 bg-green-50 rounded-2xl text-green-600"><Gift className="h-6 w-6" /></div>
-                    <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-lg">Ready</span>
+                    <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-lg">Listos</span>
                   </div>
                   <p className="text-3xl font-bold text-gray-900">{stats.rewardsReached}</p>
-                  <p className="text-sm text-gray-500">Rewards Reached</p>
+                  <p className="text-sm text-gray-500">Premios Alcanzados</p>
                 </div>
                 <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                   <div className="flex items-center justify-between mb-4">
                     <div className="p-3 bg-purple-50 rounded-2xl text-purple-600"><TrendingUp className="h-6 w-6" /></div>
-                    <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded-lg">Avg</span>
+                    <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded-lg">Prom</span>
                   </div>
                   <p className="text-3xl font-bold text-gray-900">{stats.avgPurchases}</p>
-                  <p className="text-sm text-gray-500">Stamps per Customer</p>
+                  <p className="text-sm text-gray-500">Sellos por Cliente</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <h2 className="text-xl font-bold mb-6">Stamp Activity (Last 7 Days)</h2>
+                  <h2 className="text-xl font-bold mb-6">Actividad de Sellos (Últimos 7 Días)</h2>
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={chartData}>
@@ -721,7 +933,7 @@ export default function AdminPanel() {
                 </div>
 
                 <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <h2 className="text-xl font-bold mb-6">Customer Progress</h2>
+                  <h2 className="text-xl font-bold mb-6">Progreso de Clientes</h2>
                   <div className="h-64 flex items-center justify-center">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -756,70 +968,116 @@ export default function AdminPanel() {
           {/* Billing Tab */}
           {activeTab === "billing" && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">Cobranzas</h1>
-                <p className="text-gray-500 mt-1">Manage payment reminders and collections.</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">Cobranzas</h1>
+                  <p className="text-gray-500 mt-1">Historial de ventas y cobros realizados.</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center space-x-4">
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500 uppercase font-bold">Total Recaudado</p>
+                    <p className="text-2xl font-bold text-orange-600">{business?.currency || "$"} {purchases.reduce((sum, p) => sum + (p.amount || 0), 0).toLocaleString()}</p>
+                  </div>
+                  <div className="p-3 bg-orange-50 rounded-xl text-orange-600">
+                    <TrendingUp className="h-6 w-6" />
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div className="md:col-span-2 space-y-6">
-                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                    <h2 className="text-xl font-bold mb-6 flex items-center space-x-2"><CreditCard className="h-5 w-5 text-orange-600" /><span>Send Payment Reminder</span></h2>
-                    <form onSubmit={(e) => {
-                      e.preventDefault();
-                      const formData = new FormData(e.currentTarget);
-                      const message = formData.get("message") as string;
-                      sendBulkNotification("Cobranza", message, customers.filter(c => c.email));
-                    }} className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Message Template</label>
-                        <textarea
-                          name="message"
-                          rows={4}
-                          className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
-                          placeholder="Estimado cliente, le recordamos que tiene un pago pendiente..."
-                          required
-                        ></textarea>
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={saving}
-                        className="w-full bg-orange-600 text-white py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all shadow-lg shadow-orange-200 flex items-center justify-center space-x-2"
-                      >
-                        <Send className="h-5 w-5" />
-                        <span>Send to {customers.filter(c => c.email).length} Customers</span>
-                      </button>
-                    </form>
-                  </div>
-
-                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                    <h2 className="text-xl font-bold mb-6">Recent Billing Activity</h2>
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                        <div className="flex items-center space-x-3">
-                          <div className="p-2 bg-blue-100 rounded-lg text-blue-600"><Mail className="h-4 w-4" /></div>
-                          <div>
-                            <p className="font-bold text-gray-900">Bulk Reminder Sent</p>
-                            <p className="text-xs text-gray-500">To 15 customers via Email</p>
-                          </div>
-                        </div>
-                        <span className="text-xs text-gray-400">2 days ago</span>
-                      </div>
-                    </div>
+                <div className="md:col-span-2 bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider font-bold">
+                          <th className="px-6 py-4">Fecha</th>
+                          <th className="px-6 py-4">Cliente</th>
+                          <th className="px-6 py-4">Monto</th>
+                          <th className="px-6 py-4">Método</th>
+                          <th className="px-6 py-4">Notas</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {purchases.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-12 text-center text-gray-400">No hay registros de cobranzas aún.</td>
+                          </tr>
+                        ) : (
+                          purchases.map(p => {
+                            const cust = customers.find(c => c.id === p.customerId);
+                            return (
+                              <tr key={p.id} className="hover:bg-gray-50/50 transition-all">
+                                <td className="px-6 py-4 text-sm text-gray-600">
+                                  {format(new Date(p.timestamp), "dd/MM/yyyy HH:mm")}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <p className="font-bold text-gray-900">{cust?.name || "Cliente"}</p>
+                                  <p className="text-xs text-gray-500">{p.customerId}</p>
+                                </td>
+                                <td className="px-6 py-4 font-bold text-gray-900">
+                                  {business?.currency || "$"} {p.amount?.toLocaleString() || "0"}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <span className="px-3 py-1 bg-gray-100 rounded-full text-xs font-medium text-gray-600">
+                                    {p.paymentMethod || "N/A"}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-sm text-gray-500 italic">
+                                  {p.notes || "-"}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
                 <div className="space-y-6">
                   <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
-                    <h3 className="font-bold text-gray-900 mb-4">Billing Stats</h3>
+                    <h3 className="font-bold text-gray-900 mb-4">Acciones Rápidas</h3>
+                    <button
+                      onClick={() => {
+                        setActiveTab("marketing");
+                        setReminderForm({
+                          ...reminderForm,
+                          type: "billing",
+                          subject: "Recordatorio de Pago Pendiente",
+                          message: "Hola, te recordamos que tienes un pago pendiente en nuestro negocio. ¡Gracias!"
+                        });
+                      }}
+                      className="w-full flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-sm"
+                    >
+                      <Bell className="h-4 w-4" />
+                      <span>Programar Recordatorio de Pago</span>
+                    </button>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                    <h3 className="font-bold text-gray-900 mb-4">Estadísticas de Cobro</h3>
                     <div className="space-y-4">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-500">Pending Payments</span>
+                        <span className="text-sm text-gray-500">Pagos Pendientes</span>
                         <span className="font-bold text-red-500">5</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm text-gray-500">Reminders Sent (Mo)</span>
+                        <span className="text-sm text-gray-500">Recordatorios Enviados (Mes)</span>
                         <span className="font-bold text-gray-900">42</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                    <h3 className="font-bold text-gray-900 mb-4">Actividad Reciente</h3>
+                    <div className="space-y-4">
+                      <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-2xl">
+                        <div className="p-2 bg-blue-100 rounded-lg text-blue-600"><Mail className="h-4 w-4" /></div>
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-gray-900">Recordatorio Masivo Enviado</p>
+                          <p className="text-xs text-gray-500">A 15 clientes vía Email</p>
+                          <p className="text-[10px] text-gray-400 mt-1">Hace 2 días</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -831,74 +1089,209 @@ export default function AdminPanel() {
           {/* Marketing Tab */}
           {activeTab === "marketing" && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">Marketing & Promociones</h1>
-                <p className="text-gray-500 mt-1">Announce special dates and new rewards.</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">Marketing & Notificaciones</h1>
+                  <p className="text-gray-500 mt-1">Crea campañas y programa recordatorios para tus clientes.</p>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div className="md:col-span-2 space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-8">
+                  {/* Email-like Reminder Form */}
                   <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                    <h2 className="text-xl font-bold mb-6 flex items-center space-x-2"><Megaphone className="h-5 w-5 text-orange-600" /><span>New Campaign</span></h2>
-                    <form onSubmit={(e) => {
-                      e.preventDefault();
-                      const formData = new FormData(e.currentTarget);
-                      const message = formData.get("message") as string;
-                      sendBulkNotification("Promoción", message, customers.filter(c => c.email));
-                    }} className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Campaign Message</label>
-                        <textarea
-                          name="message"
-                          rows={4}
-                          className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
-                          placeholder="¡Feliz Día del Padre! Hoy tenemos 2x1 en todos nuestros productos..."
-                          required
-                        ></textarea>
+                    <h2 className="text-xl font-bold mb-6 flex items-center space-x-2">
+                      <Mail className="h-5 w-5 text-orange-600" />
+                      <span>Nuevo Recordatorio / Campaña</span>
+                    </h2>
+                    
+                    <form onSubmit={handleScheduleReminder} className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Notificación</label>
+                          <select
+                            value={reminderForm.type}
+                            onChange={e => setReminderForm({ ...reminderForm, type: e.target.value as any })}
+                            className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                          >
+                            <option value="marketing">Marketing / Promoción</option>
+                            <option value="billing">Cobranza / Recordatorio de Pago</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Programar para</label>
+                          <div className="relative">
+                            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                            <input
+                              type="datetime-local"
+                              value={reminderForm.scheduledAt}
+                              onChange={e => setReminderForm({ ...reminderForm, scheduledAt: e.target.value })}
+                              className="w-full pl-12 pr-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                              required
+                            />
+                          </div>
+                        </div>
                       </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Seleccionar Clientes</label>
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCustomers(customers.map(c => c.id))}
+                              className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full text-gray-600 transition-colors"
+                            >
+                              Seleccionar Todos ({customers.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCustomers([])}
+                              className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full text-gray-600 transition-colors"
+                            >
+                              Desmarcar Todos
+                            </button>
+                          </div>
+                          <div className="max-h-40 overflow-y-auto border border-gray-100 rounded-xl p-4 space-y-2 bg-gray-50/50">
+                            {customers.map(customer => (
+                              <label key={customer.id} className="flex items-center space-x-3 cursor-pointer hover:bg-white p-2 rounded-lg transition-colors">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedCustomers.includes(customer.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedCustomers([...selectedCustomers, customer.id]);
+                                    } else {
+                                      setSelectedCustomers(selectedCustomers.filter(id => id !== customer.id));
+                                    }
+                                  }}
+                                  className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">{customer.name}</p>
+                                  <p className="text-xs text-gray-500 truncate">{customer.email || customer.phone || "Sin contacto"}</p>
+                                </div>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 bg-gray-50 p-6 rounded-2xl border border-gray-100">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Asunto (Para Email)</label>
+                          <input
+                            type="text"
+                            value={reminderForm.subject}
+                            onChange={e => setReminderForm({ ...reminderForm, subject: e.target.value })}
+                            className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500 bg-white"
+                            placeholder="Ej: ¡Nueva promoción disponible!"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Mensaje (Email, Telegram, WhatsApp)</label>
+                          <textarea
+                            value={reminderForm.message}
+                            onChange={e => setReminderForm({ ...reminderForm, message: e.target.value })}
+                            rows={5}
+                            className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500 bg-white"
+                            placeholder="Escribe el contenido de tu mensaje aquí..."
+                            required
+                          ></textarea>
+                        </div>
+                      </div>
+
                       <button
                         type="submit"
-                        disabled={saving}
-                        className="w-full bg-orange-600 text-white py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all shadow-lg shadow-orange-200 flex items-center justify-center space-x-2"
+                        disabled={saving || selectedCustomers.length === 0}
+                        className="w-full flex items-center justify-center space-x-2 bg-orange-600 text-white px-6 py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all disabled:opacity-50 shadow-lg shadow-orange-100"
                       >
-                        <Send className="h-5 w-5" />
-                        <span>Blast to {customers.filter(c => c.email).length} Customers</span>
+                        {saving ? (
+                          <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div>
+                        ) : (
+                          <>
+                            <Clock className="h-5 w-5" />
+                            <span>Programar Notificación ({selectedCustomers.length} clientes)</span>
+                          </>
+                        )}
                       </button>
                     </form>
                   </div>
 
-                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                    <h2 className="text-xl font-bold mb-6">Upcoming Special Dates</h2>
-                    <div className="space-y-4">
-                      {[
-                        { date: "May 10", event: "Mother's Day", status: "Scheduled" },
-                        { date: "Jun 15", event: "Father's Day", status: "Draft" },
-                      ].map((d, i) => (
-                        <div key={i} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                          <div className="flex items-center space-x-3">
-                            <div className="p-2 bg-orange-100 rounded-lg text-orange-600"><Calendar className="h-4 w-4" /></div>
-                            <div>
-                              <p className="font-bold text-gray-900">{d.event}</p>
-                              <p className="text-xs text-gray-500">{d.date}</p>
-                            </div>
-                          </div>
-                          <span className={cn(
-                            "text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider",
-                            d.status === "Scheduled" ? "bg-green-100 text-green-600" : "bg-gray-200 text-gray-600"
-                          )}>{d.status}</span>
-                        </div>
-                      ))}
+                  {/* Reminders History */}
+                  <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                      <h2 className="text-xl font-bold flex items-center space-x-2">
+                        <History className="h-5 w-5 text-orange-600" />
+                        <span>Historial de Notificaciones</span>
+                      </h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50/50">
+                          <tr>
+                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Programado</th>
+                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Tipo</th>
+                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Asunto</th>
+                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Destinatarios</th>
+                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {reminders.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-6 py-12 text-center text-gray-400">No hay notificaciones programadas aún.</td>
+                            </tr>
+                          ) : (
+                            reminders.map(reminder => (
+                              <tr key={reminder.id} className="hover:bg-gray-50/50 transition-all">
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                  {format(new Date(reminder.scheduledAt), "dd/MM/yyyy HH:mm")}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span className={cn(
+                                    "px-3 py-1 rounded-full text-[10px] font-bold uppercase",
+                                    reminder.type === "marketing" ? "bg-purple-100 text-purple-600" : "bg-blue-100 text-blue-600"
+                                  )}>
+                                    {reminder.type === "marketing" ? "Marketing" : "Cobranza"}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs truncate">
+                                  {reminder.subject}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                  {reminder.customerIds.length} clientes
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span className={cn(
+                                    "flex items-center space-x-1 text-xs font-medium",
+                                    reminder.status === "sent" ? "text-green-600" : 
+                                    reminder.status === "failed" ? "text-red-600" : "text-orange-600"
+                                  )}>
+                                    {reminder.status === "sent" ? <CheckCircle2 className="h-3 w-3" /> : 
+                                     reminder.status === "failed" ? <AlertCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                                    <span>{reminder.status === "sent" ? "Enviado" : reminder.status === "failed" ? "Fallido" : "Pendiente"}</span>
+                                  </span>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </div>
 
-                <div className="space-y-6">
+                <div className="space-y-8">
                   <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
-                    <h3 className="font-bold text-gray-900 mb-4">Quick Templates</h3>
-                    <div className="space-y-2">
-                      <button className="w-full text-left p-3 text-sm text-gray-600 hover:bg-gray-50 rounded-xl transition-all border border-transparent hover:border-gray-200">🎂 Birthday Special</button>
-                      <button className="w-full text-left p-3 text-sm text-gray-600 hover:bg-gray-50 rounded-xl transition-all border border-transparent hover:border-gray-200">🎄 Christmas Promo</button>
-                      <button className="w-full text-left p-3 text-sm text-gray-600 hover:bg-gray-50 rounded-xl transition-all border border-transparent hover:border-gray-200">⚡ Flash Sale</button>
+                    <h3 className="font-bold text-gray-900 mb-4">Próximas Fechas Especiales</h3>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-orange-50 rounded-2xl border border-orange-100">
+                        <p className="text-xs font-bold text-orange-600 uppercase mb-1">Próximo Domingo</p>
+                        <p className="font-bold text-gray-900">Día de la Madre</p>
+                        <p className="text-xs text-gray-500 mt-1">Ideal para una campaña de 2x1.</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -914,32 +1307,78 @@ export default function AdminPanel() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden">
               <div className="p-8 border-b border-gray-100 flex justify-between items-center">
-                <h2 className="text-2xl font-bold">{isAddingCustomer ? "Add Customer" : "Edit Customer"}</h2>
+                <h2 className="text-2xl font-bold">{isAddingCustomer ? "Añadir Cliente" : "Editar Cliente"}</h2>
                 <button onClick={() => { setIsAddingCustomer(false); setIsEditingCustomer(null); }} className="p-2 hover:bg-gray-100 rounded-full transition-all"><X className="h-6 w-6" /></button>
               </div>
               <form onSubmit={isAddingCustomer ? handleAddCustomer : handleUpdateCustomer} className="p-8 space-y-6">
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Número de Teléfono</label>
                     <input type="tel" name="phone" defaultValue={isEditingCustomer?.phone} disabled={!!isEditingCustomer} className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500 disabled:bg-gray-50" required />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo</label>
                     <input type="text" name="name" defaultValue={isEditingCustomer?.name} className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Email (Optional)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email (Opcional)</label>
                     <input type="email" name="email" defaultValue={isEditingCustomer?.email} className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notas del Cliente</label>
+                    <textarea name="notes" defaultValue={isEditingCustomer?.notes} placeholder="Preferencias, alergias, etc." className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                    <select name="status" defaultValue={isEditingCustomer?.status || 'active'} className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500">
+                      <option value="active">Activo</option>
+                      <option value="inactive">Inactivo</option>
+                    </select>
                   </div>
                   {!isAddingCustomer && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Coupons Count</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Cantidad de Sellos</label>
                       <input type="number" name="couponsCount" defaultValue={isEditingCustomer?.couponsCount} className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500" />
                     </div>
                   )}
                 </div>
                 <button type="submit" className="w-full bg-orange-600 text-white py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all shadow-lg shadow-orange-200">
-                  {isAddingCustomer ? "Add Customer" : "Save Changes"}
+                  {isAddingCustomer ? "Añadir Cliente" : "Guardar Cambios"}
+                </button>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {isAddingPurchase && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="p-8 border-b border-gray-100 flex justify-between items-center">
+                <h2 className="text-2xl font-bold">Registrar Venta</h2>
+                <button onClick={() => setIsAddingPurchase(null)} className="p-2 hover:bg-gray-100 rounded-full transition-all"><X className="h-6 w-6" /></button>
+              </div>
+              <form onSubmit={handleAddPurchase} className="p-8 space-y-6">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Monto de la Venta ({business?.currency || "$"})</label>
+                    <input type="number" step="0.01" name="amount" className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Método de Pago</label>
+                    <select name="paymentMethod" className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500">
+                      <option value="Efectivo">Efectivo</option>
+                      <option value="Tarjeta">Tarjeta</option>
+                      <option value="Transferencia">Transferencia</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notas de la Venta</label>
+                    <textarea name="notes" placeholder="Detalles de la compra..." className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500" />
+                  </div>
+                </div>
+                <button type="submit" className="w-full bg-orange-600 text-white py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all shadow-lg shadow-orange-200">
+                  Registrar Venta y Sello
                 </button>
               </form>
             </motion.div>
@@ -950,7 +1389,7 @@ export default function AdminPanel() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden">
               <div className="p-8 border-b border-gray-100 flex justify-between items-center">
-                <h2 className="text-2xl font-bold flex items-center space-x-2"><History className="h-6 w-6 text-orange-600" /><span>Purchase History</span></h2>
+                <h2 className="text-2xl font-bold flex items-center space-x-2"><History className="h-6 w-6 text-orange-600" /><span>Historial de Compras</span></h2>
                 <button onClick={() => setShowHistory(null)} className="p-2 hover:bg-gray-100 rounded-full transition-all"><X className="h-6 w-6" /></button>
               </div>
               <div className="p-8 max-h-[60vh] overflow-y-auto">
@@ -960,7 +1399,7 @@ export default function AdminPanel() {
                       <div key={p.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
                         <div className="flex items-center space-x-3">
                           <div className="h-8 w-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">{customerHistory.length - i}</div>
-                          <p className="font-medium text-gray-900">{format(new Date(p.timestamp), "PPPP")}</p>
+                          <p className="font-medium text-gray-900">{format(new Date(p.timestamp), "PPPP", { locale: es })}</p>
                         </div>
                         <p className="text-xs text-gray-500">{format(new Date(p.timestamp), "HH:mm:ss")}</p>
                       </div>
@@ -969,7 +1408,7 @@ export default function AdminPanel() {
                 ) : (
                   <div className="text-center py-10">
                     <History className="h-12 w-12 text-gray-200 mx-auto mb-3" />
-                    <p className="text-gray-500">No purchase history found.</p>
+                    <p className="text-gray-500">No se encontró historial de compras.</p>
                   </div>
                 )}
               </div>

@@ -5,6 +5,7 @@ import { db } from "../firebase";
 import { Business, Customer } from "../types";
 import { Phone, Gift, CheckCircle2, AlertCircle, Clock, ArrowRight } from "lucide-react";
 import { formatDistanceToNow, differenceInHours } from "date-fns";
+import { es } from "date-fns/locale";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 
@@ -40,7 +41,7 @@ export default function PublicPanel() {
   const handleIdentify = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!phone || phone.length < 8) {
-      setMessage({ type: "error", text: "Please enter a valid phone number." });
+      setMessage({ type: "error", text: "Por favor, ingresa un número de teléfono válido." });
       return;
     }
 
@@ -66,7 +67,7 @@ export default function PublicPanel() {
             setCustomer(currentCustomer);
             setMessage({ 
               type: "info", 
-              text: `Please wait ${cooldown - hoursDiff} more hours before your next stamp.` 
+              text: `Por favor, espera ${cooldown - hoursDiff} horas más antes de tu próximo sello.` 
             });
             setRegistering(false);
             return;
@@ -104,7 +105,7 @@ export default function PublicPanel() {
         lastPurchaseAt: now,
       };
       setCustomer(updatedCustomer);
-      setMessage({ type: "success", text: "Stamp added successfully!" });
+      setMessage({ type: "success", text: "¡Sello añadido con éxito!" });
 
       // Notify Admin (Server-side)
       if (business?.notificationsEnabled) {
@@ -113,7 +114,7 @@ export default function PublicPanel() {
 
     } catch (err) {
       console.error("Error registering purchase:", err);
-      setMessage({ type: "error", text: "Something went wrong. Please try again." });
+      setMessage({ type: "error", text: "Algo salió mal. Por favor, inténtalo de nuevo." });
     } finally {
       setRegistering(false);
     }
@@ -126,7 +127,7 @@ export default function PublicPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: isRewardReached ? "Reward Reached" : "Purchase Registered",
+          type: isRewardReached ? "Premio Alcanzado" : "Compra Registrada",
           data: {
             customer: cust.phone,
             coupons: cust.couponsCount,
@@ -156,8 +157,8 @@ export default function PublicPanel() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="text-center max-w-md">
           <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900">Business Not Found</h1>
-          <p className="text-gray-600 mt-2">The link you followed seems to be invalid or the business no longer exists.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Negocio no encontrado</h1>
+          <p className="text-gray-600 mt-2">El enlace que seguiste parece ser inválido o el negocio ya no existe.</p>
         </div>
       </div>
     );
@@ -174,17 +175,30 @@ export default function PublicPanel() {
         className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100"
       >
         {/* Header */}
-        <div className="bg-orange-600 p-8 text-center text-white">
-          <h1 className="text-3xl font-bold tracking-tight">{business.name}</h1>
-          <p className="mt-2 text-orange-100 font-medium">{business.rewardDescription}</p>
+        <div className="bg-orange-600 p-8 text-center text-white relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+            <div className="absolute -top-10 -left-10 w-40 h-40 bg-white rounded-full blur-3xl"></div>
+            <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white rounded-full blur-3xl"></div>
+          </div>
+          
+          <div className="relative z-10 flex flex-col items-center">
+            {business.logoUrl && (
+              <div className="h-20 w-20 bg-white rounded-2xl p-1 shadow-xl mb-4 overflow-hidden">
+                <img src={business.logoUrl} alt={business.name} className="h-full w-full object-contain rounded-xl" referrerPolicy="no-referrer" />
+              </div>
+            )}
+            <h1 className="text-3xl font-bold tracking-tight">{business.name}</h1>
+            {business.slogan && <p className="text-orange-100 text-xs uppercase font-bold tracking-widest mt-1">{business.slogan}</p>}
+            <p className="mt-3 text-orange-50 font-medium bg-orange-500/30 px-4 py-1 rounded-full inline-block">{business.rewardDescription}</p>
+          </div>
         </div>
 
         <div className="p-8">
           {!customer ? (
             <form onSubmit={handleIdentify} className="space-y-6">
               <div className="text-center mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">Welcome!</h2>
-                <p className="text-gray-500 text-sm mt-1">Enter your phone to get your stamp.</p>
+                <h2 className="text-xl font-semibold text-gray-900">¡Bienvenido!</h2>
+                <p className="text-gray-500 text-sm mt-1">Ingresa tu teléfono para obtener tu sello.</p>
               </div>
 
               <div className="relative">
@@ -195,7 +209,7 @@ export default function PublicPanel() {
                   type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="Phone Number"
+                  placeholder="Número de teléfono"
                   className="block w-full pl-12 pr-4 py-4 border-gray-200 border rounded-2xl focus:ring-orange-500 focus:border-orange-500 text-lg font-medium transition-all"
                   required
                 />
@@ -210,7 +224,7 @@ export default function PublicPanel() {
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
                 ) : (
                   <>
-                    Get My Stamp
+                    Obtener mi sello
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </>
                 )}
@@ -224,9 +238,9 @@ export default function PublicPanel() {
                   <Gift className="h-8 w-8 text-orange-600" />
                 </div>
                 <h2 className="text-2xl font-bold text-gray-900">
-                  {customer.couponsCount} of {business.couponsNeeded}
+                  {customer.couponsCount} de {business.couponsNeeded}
                 </h2>
-                <p className="text-gray-500 text-sm mt-1">Stamps accumulated</p>
+                <p className="text-gray-500 text-sm mt-1">Sellos acumulados</p>
               </div>
 
               {/* Progress Bar */}
@@ -250,14 +264,26 @@ export default function PublicPanel() {
                     className="bg-green-50 border border-green-200 p-6 rounded-3xl text-center"
                   >
                     <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" />
-                    <h3 className="text-xl font-bold text-green-800">Reward Ready!</h3>
-                    <p className="text-green-700 mt-1">Show this screen to the staff to claim your reward.</p>
+                    <h3 className="text-xl font-bold text-green-800">¡Premio listo!</h3>
+                    <p className="text-green-700 mt-1">Muestra esta pantalla al personal para canjear tu premio.</p>
                   </motion.div>
                 ) : (
-                  <div className="bg-gray-50 p-6 rounded-3xl text-center border border-gray-100">
-                    <p className="text-gray-600">
-                      You need <span className="font-bold text-orange-600">{business.couponsNeeded - customer.couponsCount}</span> more stamps for your <span className="font-medium">{business.rewardDescription}</span>.
-                    </p>
+                  <div className="space-y-4">
+                    {business.rewardImageUrl && (
+                      <div className="w-full h-48 rounded-2xl overflow-hidden border border-gray-100 shadow-inner">
+                        <img src={business.rewardImageUrl} alt="Premio" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      </div>
+                    )}
+                    <div className="bg-gray-50 p-6 rounded-3xl text-center border border-gray-100">
+                      <p className="text-gray-600">
+                        Necesitas <span className="font-bold text-orange-600">{business.couponsNeeded - customer.couponsCount}</span> sellos más para tu <span className="font-medium">{business.rewardDescription}</span>.
+                      </p>
+                      {business.rewardLongDescription && (
+                        <p className="text-xs text-gray-400 mt-3 italic">
+                          {business.rewardLongDescription}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
               </AnimatePresence>
@@ -266,7 +292,7 @@ export default function PublicPanel() {
               {customer.lastPurchaseAt && (
                 <div className="flex items-center justify-center text-gray-400 text-xs space-x-2">
                   <Clock className="h-3 w-3" />
-                  <span>Last stamp: {formatDistanceToNow(new Date(customer.lastPurchaseAt))} ago</span>
+                  <span>Último sello: hace {formatDistanceToNow(new Date(customer.lastPurchaseAt), { addSuffix: true, locale: es })}</span>
                 </div>
               )}
 
@@ -278,7 +304,7 @@ export default function PublicPanel() {
                 }}
                 className="w-full py-3 text-gray-500 font-medium hover:text-gray-700 transition-colors"
               >
-                Use another number
+                Usar otro número
               </button>
             </div>
           )}
@@ -307,7 +333,7 @@ export default function PublicPanel() {
 
       {/* Footer */}
       <footer className="mt-10 text-center text-gray-400 text-sm">
-        <p>© {new Date().getFullYear()} Fideliza Rewards</p>
+        <p>© {new Date().getFullYear()} Fideliza Recompensas</p>
       </footer>
     </div>
   );
