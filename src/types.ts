@@ -18,6 +18,8 @@ export interface Business {
   whatsappPhone?: string;
   whatsappApiKey?: string;
   currency?: string;
+  themeColor?: string;
+  darkModeEnabled?: boolean;
   // New: Loyalty Levels Config
   levels?: {
     silver: { minSpent: number; multiplier: number };

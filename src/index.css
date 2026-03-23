@@ -1,1 +1,20 @@
 @import "tailwindcss";
+
+@theme {
+  --color-primary: var(--primary-color, #ea580c);
+}
+
+:root {
+  --primary-color: #ea580c;
+}
+
+.dark {
+  background-color: #0f172a;
+  color: #f8fafc;
+}
+
+@layer base {
+  body {
+    @apply transition-colors duration-300;
+  }
+}

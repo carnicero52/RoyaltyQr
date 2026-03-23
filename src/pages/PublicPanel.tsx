@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, query, where, getDocs, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { Business, Customer } from "../types";
-import { Phone, Gift, CheckCircle2, AlertCircle, Clock, ArrowRight } from "lucide-react";
+import { Phone, Gift, CheckCircle2, AlertCircle, Clock, ArrowRight, Moon, Sun } from "lucide-react";
 import { formatDistanceToNow, differenceInHours } from "date-fns";
 import { es } from "date-fns/locale";
 import { motion, AnimatePresence } from "motion/react";
@@ -18,11 +18,22 @@ export default function PublicPanel() {
   const [registering, setRegistering] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
+  const [darkMode, setDarkMode] = useState(false);
+
   useEffect(() => {
     if (businessId) {
       fetchBusiness();
     }
   }, [businessId]);
+
+  useEffect(() => {
+    if (business) {
+      setDarkMode(business.darkModeEnabled || false);
+      if (business.themeColor) {
+        document.documentElement.style.setProperty('--primary-color', business.themeColor);
+      }
+    }
+  }, [business]);
 
   const fetchBusiness = async () => {
     try {
@@ -52,36 +63,32 @@ export default function PublicPanel() {
       const customerRef = doc(db, "businesses", businessId!, "customers", phone);
       const customerSnap = await getDoc(customerRef);
 
-      let currentCustomer: Customer;
+      if (!customerSnap.exists()) {
+        setMessage({ 
+          type: "error", 
+          text: "Cliente no encontrado. Por favor, diríjase al negocio y regístrese." 
+        });
+        setRegistering(false);
+        return;
+      }
 
-      if (customerSnap.exists()) {
-        currentCustomer = { id: customerSnap.id, ...customerSnap.data() } as Customer;
-        
-        // Check Cooldown
-        if (currentCustomer.lastPurchaseAt) {
-          const lastPurchase = new Date(currentCustomer.lastPurchaseAt);
-          const hoursDiff = differenceInHours(new Date(), lastPurchase);
-          const cooldown = business?.cooldownHours || 2;
+      const currentCustomer = { id: customerSnap.id, ...customerSnap.data() } as Customer;
+      
+      // Check Cooldown
+      if (currentCustomer.lastPurchaseAt) {
+        const lastPurchase = new Date(currentCustomer.lastPurchaseAt);
+        const hoursDiff = differenceInHours(new Date(), lastPurchase);
+        const cooldown = business?.cooldownHours || 2;
 
-          if (hoursDiff < cooldown) {
-            setCustomer(currentCustomer);
-            setMessage({ 
-              type: "info", 
-              text: `Por favor, espera ${cooldown - hoursDiff} horas más antes de tu próximo sello.` 
-            });
-            setRegistering(false);
-            return;
-          }
+        if (hoursDiff < cooldown) {
+          setCustomer(currentCustomer);
+          setMessage({ 
+            type: "info", 
+            text: `Por favor, espera ${cooldown - hoursDiff} horas más antes de tu próximo sello.` 
+          });
+          setRegistering(false);
+          return;
         }
-      } else {
-        // Create New Customer
-        currentCustomer = {
-          id: phone,
-          phone,
-          couponsCount: 0,
-          businessId: businessId!,
-        };
-        await setDoc(customerRef, currentCustomer);
       }
 
       // Register Purchase
@@ -168,14 +175,31 @@ export default function PublicPanel() {
   const isRewardReady = customer && customer.couponsCount >= business.couponsNeeded;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4 sm:px-6">
+    <div className={cn(
+      "min-h-screen flex flex-col items-center py-10 px-4 sm:px-6 transition-colors duration-300",
+      darkMode ? "bg-slate-950 text-slate-100" : "bg-gray-50 text-gray-900"
+    )}>
+      {/* Theme Toggle */}
+      <button
+        onClick={() => setDarkMode(!darkMode)}
+        className={cn(
+          "fixed top-4 right-4 p-3 rounded-full shadow-lg z-50 transition-all",
+          darkMode ? "bg-slate-800 text-yellow-400" : "bg-white text-slate-600"
+        )}
+      >
+        {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+      </button>
+
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100"
+        className={cn(
+          "w-full max-w-md rounded-3xl shadow-xl overflow-hidden border transition-all",
+          darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+        )}
       >
         {/* Header */}
-        <div className="bg-orange-600 p-8 text-center text-white relative overflow-hidden">
+        <div className="bg-primary p-8 text-center text-white relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
             <div className="absolute -top-10 -left-10 w-40 h-40 bg-white rounded-full blur-3xl"></div>
             <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white rounded-full blur-3xl"></div>
@@ -188,14 +212,14 @@ export default function PublicPanel() {
               </div>
             )}
             <h1 className="text-3xl font-bold tracking-tight">{business.name}</h1>
-            {business.slogan && <p className="text-orange-100 text-xs uppercase font-bold tracking-widest mt-1">{business.slogan}</p>}
-            <p className="mt-3 text-orange-50 font-medium bg-orange-500/30 px-4 py-1 rounded-full inline-block">{business.rewardDescription}</p>
+            {business.slogan && <p className="text-white/80 text-xs uppercase font-bold tracking-widest mt-1">{business.slogan}</p>}
+            <p className="mt-3 text-white font-medium bg-white/20 px-4 py-1 rounded-full inline-block">{business.rewardDescription}</p>
             {customer?.level && (
               <div className={cn(
                 "mt-3 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-sm",
                 customer.level === 'gold' ? "bg-gradient-to-r from-yellow-400 to-yellow-600 text-white" :
                 customer.level === 'silver' ? "bg-gradient-to-r from-gray-300 to-gray-500 text-white" :
-                "bg-orange-800/40 text-orange-100 border border-orange-400/20"
+                "bg-black/20 text-white border border-white/20"
               )}>
                 Cliente {customer.level}
               </div>
@@ -207,8 +231,8 @@ export default function PublicPanel() {
           {!customer ? (
             <form onSubmit={handleIdentify} className="space-y-6">
               <div className="text-center mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">¡Bienvenido!</h2>
-                <p className="text-gray-500 text-sm mt-1">Ingresa tu teléfono para obtener tu sello.</p>
+                <h2 className={cn("text-xl font-semibold", darkMode ? "text-white" : "text-gray-900")}>¡Bienvenido!</h2>
+                <p className={cn("text-sm mt-1", darkMode ? "text-slate-400" : "text-gray-500")}>Ingresa tu teléfono para obtener tu sello.</p>
               </div>
 
               <div className="relative">
@@ -220,7 +244,10 @@ export default function PublicPanel() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="Número de teléfono"
-                  className="block w-full pl-12 pr-4 py-4 border-gray-200 border rounded-2xl focus:ring-orange-500 focus:border-orange-500 text-lg font-medium transition-all"
+                  className={cn(
+                    "block w-full pl-12 pr-4 py-4 border rounded-2xl text-lg font-medium transition-all focus:ring-2 focus:ring-primary outline-none",
+                    darkMode ? "bg-slate-800 border-slate-700 text-white placeholder:text-slate-500" : "bg-white border-gray-200 text-gray-900"
+                  )}
                   required
                 />
               </div>
@@ -228,7 +255,7 @@ export default function PublicPanel() {
               <button
                 type="submit"
                 disabled={registering}
-                className="w-full flex justify-center items-center py-4 px-4 border border-transparent rounded-2xl shadow-sm text-lg font-bold text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-all disabled:opacity-50"
+                className="w-full flex justify-center items-center py-4 px-4 border border-transparent rounded-2xl shadow-sm text-lg font-bold text-white bg-primary hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all disabled:opacity-50"
               >
                 {registering ? (
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
@@ -244,23 +271,23 @@ export default function PublicPanel() {
             <div className="space-y-8">
               {/* Progress Section */}
               <div className="text-center">
-                <div className="inline-flex items-center justify-center p-4 bg-orange-50 rounded-full mb-4">
-                  <Gift className="h-8 w-8 text-orange-600" />
+                <div className={cn("inline-flex items-center justify-center p-4 rounded-full mb-4", darkMode ? "bg-primary/20" : "bg-primary/10")}>
+                  <Gift className="h-8 w-8 text-primary" />
                 </div>
-                <h2 className="text-2xl font-bold text-gray-900">
+                <h2 className={cn("text-2xl font-bold", darkMode ? "text-white" : "text-gray-900")}>
                   {customer.couponsCount} de {business.couponsNeeded}
                 </h2>
-                <p className="text-gray-500 text-sm mt-1">Sellos acumulados</p>
+                <p className={cn("text-sm mt-1", darkMode ? "text-slate-400" : "text-gray-500")}>Sellos acumulados</p>
               </div>
 
               {/* Progress Bar */}
               <div className="relative pt-1">
-                <div className="overflow-hidden h-4 mb-4 text-xs flex rounded-full bg-orange-100">
+                <div className={cn("overflow-hidden h-4 mb-4 text-xs flex rounded-full", darkMode ? "bg-slate-800" : "bg-primary/10")}>
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${Math.min(progress, 100)}%` }}
                     transition={{ duration: 1, ease: "easeOut" }}
-                    className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-orange-600"
+                    className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-primary"
                   ></motion.div>
                 </div>
               </div>
@@ -271,25 +298,28 @@ export default function PublicPanel() {
                   <motion.div 
                     initial={{ scale: 0.9, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
-                    className="bg-green-50 border border-green-200 p-6 rounded-3xl text-center"
+                    className={cn(
+                      "border p-6 rounded-3xl text-center",
+                      darkMode ? "bg-green-900/20 border-green-800 text-green-400" : "bg-green-50 border-green-200 text-green-800"
+                    )}
                   >
                     <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" />
-                    <h3 className="text-xl font-bold text-green-800">¡Premio listo!</h3>
-                    <p className="text-green-700 mt-1">Muestra esta pantalla al personal para canjear tu premio.</p>
+                    <h3 className="text-xl font-bold">¡Premio listo!</h3>
+                    <p className="mt-1 opacity-80">Muestra esta pantalla al personal para canjear tu premio.</p>
                   </motion.div>
                 ) : (
                   <div className="space-y-4">
                     {business.rewardImageUrl && (
-                      <div className="w-full h-48 rounded-2xl overflow-hidden border border-gray-100 shadow-inner">
+                      <div className={cn("w-full h-48 rounded-2xl overflow-hidden border shadow-inner", darkMode ? "border-slate-800" : "border-gray-100")}>
                         <img src={business.rewardImageUrl} alt="Premio" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                       </div>
                     )}
-                    <div className="bg-gray-50 p-6 rounded-3xl text-center border border-gray-100">
-                      <p className="text-gray-600">
-                        Necesitas <span className="font-bold text-orange-600">{business.couponsNeeded - customer.couponsCount}</span> sellos más para tu <span className="font-medium">{business.rewardDescription}</span>.
+                    <div className={cn("p-6 rounded-3xl text-center border", darkMode ? "bg-slate-800 border-slate-700" : "bg-gray-50 border-gray-100")}>
+                      <p className={darkMode ? "text-slate-300" : "text-gray-600"}>
+                        Necesitas <span className="font-bold text-primary">{business.couponsNeeded - customer.couponsCount}</span> sellos más para tu <span className="font-medium">{business.rewardDescription}</span>.
                       </p>
                       {business.rewardLongDescription && (
-                        <p className="text-xs text-gray-400 mt-3 italic">
+                        <p className={cn("text-xs mt-3 italic", darkMode ? "text-slate-500" : "text-gray-400")}>
                           {business.rewardLongDescription}
                         </p>
                       )}
@@ -300,7 +330,7 @@ export default function PublicPanel() {
 
               {/* Last Stamp Info */}
               {customer.lastPurchaseAt && (
-                <div className="flex items-center justify-center text-gray-400 text-xs space-x-2">
+                <div className="flex items-center justify-center text-slate-500 text-xs space-x-2">
                   <Clock className="h-3 w-3" />
                   <span>Último sello: hace {formatDistanceToNow(new Date(customer.lastPurchaseAt), { addSuffix: true, locale: es })}</span>
                 </div>
@@ -312,7 +342,7 @@ export default function PublicPanel() {
                   setPhone("");
                   setMessage(null);
                 }}
-                className="w-full py-3 text-gray-500 font-medium hover:text-gray-700 transition-colors"
+                className={cn("w-full py-3 font-medium transition-colors", darkMode ? "text-slate-400 hover:text-white" : "text-gray-500 hover:text-gray-700")}
               >
                 Usar otro número
               </button>
@@ -327,10 +357,10 @@ export default function PublicPanel() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 className={cn(
-                  "mt-6 p-4 rounded-2xl flex items-start space-x-3",
-                  message.type === "success" ? "bg-green-50 text-green-800 border border-green-100" : 
-                  message.type === "error" ? "bg-red-50 text-red-800 border border-red-100" : 
-                  "bg-blue-50 text-blue-800 border border-blue-100"
+                  "mt-6 p-4 rounded-2xl flex items-start space-x-3 border",
+                  message.type === "success" ? (darkMode ? "bg-green-900/20 text-green-400 border-green-800" : "bg-green-50 text-green-800 border-green-100") : 
+                  message.type === "error" ? (darkMode ? "bg-red-900/20 text-red-400 border-red-800" : "bg-red-50 text-red-800 border-red-100") : 
+                  (darkMode ? "bg-blue-900/20 text-blue-400 border-blue-800" : "bg-blue-50 text-blue-800 border-blue-100")
                 )}
               >
                 {message.type === "success" ? <CheckCircle2 className="h-5 w-5 mt-0.5" /> : <AlertCircle className="h-5 w-5 mt-0.5" />}
@@ -342,7 +372,7 @@ export default function PublicPanel() {
       </motion.div>
 
       {/* Footer */}
-      <footer className="mt-10 text-center text-gray-400 text-sm">
+      <footer className="mt-10 text-center text-slate-500 text-sm">
         <p>© {new Date().getFullYear()} Fideliza Recompensas</p>
       </footer>
     </div>

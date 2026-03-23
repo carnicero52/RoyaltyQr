@@ -35,10 +35,8 @@ async function startServer() {
     },
   });
 
-  // API Routes
-  app.post("/api/notify", async (req, res) => {
-    const { type, data, config, message: customMessage, subject: customSubject, toEmail, toPhone, toTelegram } = req.body;
-    
+  // Notification Logic
+  const sendNotification = async ({ type, data, config, message: customMessage, subject: customSubject, toEmail, toPhone, toTelegram }: any) => {
     const message = customMessage || `
       🔔 Fideliza Notification: ${type}
       
@@ -76,9 +74,19 @@ async function startServer() {
         await fetch(url);
       }
 
-      res.json({ success: true });
+      return { success: true };
     } catch (error) {
       console.error("Notification error:", error);
+      throw error;
+    }
+  };
+
+  // API Routes
+  app.post("/api/notify", async (req, res) => {
+    try {
+      await sendNotification(req.body);
+      res.json({ success: true });
+    } catch (error) {
       res.status(500).json({ error: "Failed to send notification" });
     }
   });
@@ -115,31 +123,23 @@ async function startServer() {
             const customerDoc = await db.collection("businesses").doc(reminder.businessId).collection("customers").doc(customerId).get();
             const customer = customerDoc.data();
             if (customer) {
-              await fetch(`http://localhost:${PORT}/api/notify`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
-                  message: reminder.message,
-                  subject: reminder.subject,
-                  config,
-                  toEmail: customer.email,
-                  toPhone: customer.phone,
-                }),
+              await sendNotification({
+                type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
+                message: reminder.message,
+                subject: reminder.subject,
+                config,
+                toEmail: customer.email,
+                toPhone: customer.phone,
               });
             }
           }
         } else {
           // Send to business owner if no specific customers
-          await fetch(`http://localhost:${PORT}/api/notify`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
-              message: reminder.message,
-              subject: reminder.subject,
-              config,
-            }),
+          await sendNotification({
+            type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
+            message: reminder.message,
+            subject: reminder.subject,
+            config,
           });
         }
 

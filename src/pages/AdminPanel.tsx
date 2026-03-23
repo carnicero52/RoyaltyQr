@@ -6,7 +6,8 @@ import {
   Settings, Users, QrCode, BarChart3, LogOut, Save, Plus, Search, 
   Edit2, Trash2, Download, FileText, Mail, Send, Bell, Gift,
   CheckCircle2, AlertCircle, TrendingUp, UserPlus, History, X, PlusCircle,
-  CreditCard, Megaphone, Calendar, MessageSquare, Clock, User, Check
+  CreditCard, Megaphone, Calendar, MessageSquare, Clock, User, Check,
+  Palette, Moon, Sun
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { 
@@ -114,6 +115,8 @@ export default function AdminPanel() {
           cooldownHours: 2,
           notificationsEnabled: false,
           ownerEmail: auth.currentUser?.email || "",
+          themeColor: "#ea580c", // Default orange-600
+          darkModeEnabled: false,
         };
         await setDoc(doc(db, "businesses", uid), defaultBusiness);
         setBusiness(defaultBusiness);
@@ -155,6 +158,19 @@ export default function AdminPanel() {
       unsubStaff();
     };
   }, []);
+
+  useEffect(() => {
+    if (business) {
+      if (business.themeColor) {
+        document.documentElement.style.setProperty('--primary-color', business.themeColor);
+      }
+      if (business.darkModeEnabled) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+  }, [business]);
 
   const handleScheduleReminder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -434,9 +450,15 @@ export default function AdminPanel() {
   const COLORS = ["#f97316", "#22c55e"];
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className={cn(
+      "min-h-screen flex transition-colors duration-300",
+      business?.darkModeEnabled ? "bg-slate-950 text-white" : "bg-gray-50 text-gray-900"
+    )}>
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-200 hidden md:flex flex-col">
+      <aside className={cn(
+        "w-64 border-r hidden md:flex flex-col transition-colors duration-300",
+        business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-200"
+      )}>
           <div className="p-6">
             <div className="flex items-center space-x-3">
               <div className="h-10 w-10 bg-orange-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-orange-200 overflow-hidden">
@@ -447,7 +469,7 @@ export default function AdminPanel() {
                 )}
               </div>
               <div>
-                <h1 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">{business?.name || "Fideliza"}</h1>
+                <h1 className={cn("text-lg font-bold tracking-tight leading-tight", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{business?.name || "Fideliza"}</h1>
                 {business?.slogan && <p className="text-[9px] text-gray-400 uppercase font-bold tracking-widest truncate w-32">{business.slogan}</p>}
               </div>
             </div>
@@ -458,7 +480,7 @@ export default function AdminPanel() {
             onClick={() => setActiveTab("config")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "config" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+              activeTab === "config" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
             )}
           >
             <Settings className="h-5 w-5" />
@@ -468,7 +490,7 @@ export default function AdminPanel() {
             onClick={() => setActiveTab("rewards")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "rewards" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+              activeTab === "rewards" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
             )}
           >
             <Gift className="h-5 w-5" />
@@ -478,7 +500,7 @@ export default function AdminPanel() {
             onClick={() => setActiveTab("customers")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "customers" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+              activeTab === "customers" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
             )}
           >
             <Users className="h-5 w-5" />
@@ -488,7 +510,7 @@ export default function AdminPanel() {
             onClick={() => setActiveTab("qr")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "qr" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+              activeTab === "qr" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
             )}
           >
             <QrCode className="h-5 w-5" />
@@ -498,7 +520,7 @@ export default function AdminPanel() {
             onClick={() => setActiveTab("stats")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "stats" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+              activeTab === "stats" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
             )}
           >
             <BarChart3 className="h-5 w-5" />
@@ -511,7 +533,7 @@ export default function AdminPanel() {
             onClick={() => setActiveTab("billing")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "billing" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+              activeTab === "billing" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
             )}
           >
             <CreditCard className="h-5 w-5" />
@@ -521,7 +543,7 @@ export default function AdminPanel() {
             onClick={() => setActiveTab("marketing")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "marketing" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+              activeTab === "marketing" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
             )}
           >
             <Megaphone className="h-5 w-5" />
@@ -531,7 +553,7 @@ export default function AdminPanel() {
             onClick={() => setActiveTab("staff")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "staff" ? "bg-orange-50 text-orange-600" : "text-gray-500 hover:bg-gray-50"
+              activeTab === "staff" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
             )}
           >
             <Users className="h-5 w-5" />
@@ -540,6 +562,16 @@ export default function AdminPanel() {
         </nav>
 
         <div className="p-4 border-t border-gray-100">
+          <button
+            onClick={() => {
+              const newMode = !business?.darkModeEnabled;
+              setBusiness(business ? { ...business, darkModeEnabled: newMode } : null);
+            }}
+            className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-gray-500 hover:bg-gray-50 transition-all mb-2"
+          >
+            {business?.darkModeEnabled ? <Sun className="h-5 w-5 text-yellow-500" /> : <Moon className="h-5 w-5" />}
+            <span className="font-medium">{business?.darkModeEnabled ? "Modo Claro" : "Modo Oscuro"}</span>
+          </button>
           <button
             onClick={() => auth.signOut()}
             className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 transition-all"
@@ -815,6 +847,59 @@ export default function AdminPanel() {
                           />
                         </div>
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6 md:col-span-2">
+                  <h2 className="text-xl font-bold flex items-center space-x-2"><Palette className="h-5 w-5 text-orange-600" /><span>Apariencia y Estilo</span></h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                      <label className="block text-sm font-medium text-gray-700">Color de Marca Principal</label>
+                      <div className="flex items-center space-x-4">
+                        <input 
+                          type="color" 
+                          value={business.themeColor || "#ea580c"}
+                          onChange={(e) => setBusiness({ ...business, themeColor: e.target.value })}
+                          className="h-12 w-20 rounded-lg cursor-pointer border-2 border-gray-100"
+                        />
+                        <div className="flex-1">
+                          <input 
+                            type="text" 
+                            value={business.themeColor || "#ea580c"}
+                            onChange={(e) => setBusiness({ ...business, themeColor: e.target.value })}
+                            className="w-full px-4 py-2 rounded-xl border-gray-200 border font-mono text-sm"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">Este color se aplicará a los botones y elementos destacados en el panel público.</p>
+                    </div>
+
+                    <div className="flex items-center justify-between p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                      <div className="flex items-center space-x-3">
+                        <div className={cn(
+                          "p-3 rounded-xl",
+                          business.darkModeEnabled ? "bg-gray-800 text-yellow-400" : "bg-white text-gray-400 shadow-sm"
+                        )}>
+                          {business.darkModeEnabled ? <Moon className="h-6 w-6" /> : <Sun className="h-6 w-6" />}
+                        </div>
+                        <div>
+                          <p className="font-bold text-gray-900">Modo Nocturno por Defecto</p>
+                          <p className="text-xs text-gray-500">Activa el tema oscuro para tus clientes.</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setBusiness({ ...business, darkModeEnabled: !business.darkModeEnabled })}
+                        className={cn(
+                          "w-14 h-7 rounded-full transition-all relative",
+                          business.darkModeEnabled ? "bg-orange-600" : "bg-gray-300"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-1 w-5 h-5 bg-white rounded-full transition-all shadow-sm",
+                          business.darkModeEnabled ? "right-1" : "left-1"
+                        )}></div>
+                      </button>
                     </div>
                   </div>
                 </div>
