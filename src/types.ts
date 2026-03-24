@@ -18,6 +18,8 @@ export interface Business {
   whatsappEnabled?: boolean;
   whatsappPhone?: string;
   whatsappApiKey?: string;
+  gmailUser?: string;
+  gmailAppPass?: string;
   currency?: string;
   themeColor?: string;
   darkModeEnabled?: boolean;

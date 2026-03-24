@@ -97,11 +97,20 @@ async function startServer() {
     // Email Notification
     const emailTarget = toEmail || config.email;
     if (emailTarget) {
-      if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
+      const gUser = config.gmailUser || process.env.GMAIL_USER;
+      const gPass = config.gmailAppPass || process.env.GMAIL_PASS;
+
+      if (gUser && gPass) {
         try {
-          console.log(`[Notification] Sending Email to ${emailTarget}`);
-          await transporter.sendMail({
-            from: process.env.GMAIL_USER,
+          console.log(`[Notification] Sending Email to ${emailTarget} using ${gUser}`);
+          
+          // Create a temporary transporter if using custom credentials
+          const currentTransporter = (config.gmailUser && config.gmailAppPass) 
+            ? nodemailer.createTransport({ service: 'gmail', auth: { user: gUser, pass: gPass } })
+            : transporter;
+
+          await currentTransporter.sendMail({
+            from: gUser,
             to: emailTarget,
             subject: subject,
             text: message,
@@ -112,8 +121,8 @@ async function startServer() {
           results.email = { success: false, error: err.message };
         }
       } else {
-        console.warn("[Notification] GMAIL_USER or GMAIL_PASS not set, skipping email");
-        results.email = { success: false, error: "Server credentials not configured" };
+        console.warn("[Notification] Gmail credentials not set, skipping email");
+        results.email = { success: false, error: "Email credentials not configured" };
       }
     }
 
@@ -270,6 +279,8 @@ async function startServer() {
           whatsapp: !!business.whatsappEnabled,
           whatsappPhone: business.whatsappPhone,
           whatsappApiKey: business.whatsappApiKey,
+          gmailUser: business.gmailUser,
+          gmailAppPass: business.gmailAppPass,
         };
 
         try {

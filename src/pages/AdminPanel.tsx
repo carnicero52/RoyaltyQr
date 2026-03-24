@@ -246,6 +246,8 @@ export default function AdminPanel() {
         whatsapp: !!business.whatsappEnabled,
         whatsappPhone: business.whatsappPhone,
         whatsappApiKey: business.whatsappApiKey,
+        gmailUser: business.gmailUser,
+        gmailAppPass: business.gmailAppPass,
       };
 
       let anySuccess = false;
@@ -866,6 +868,41 @@ export default function AdminPanel() {
                           business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
                         )}
                       />
+                    </div>
+                    <div>
+                      <label className={cn("block text-sm font-medium mb-1 flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>
+                        <Mail className="h-4 w-4" />
+                        <span>Gmail para Envíos (Opcional)</span>
+                      </label>
+                      <input
+                        type="email"
+                        value={business.gmailUser || ""}
+                        onChange={e => setBusiness({ ...business, gmailUser: e.target.value })}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
+                        placeholder="tu-email@gmail.com"
+                      />
+                    </div>
+                    <div>
+                      <label className={cn("block text-sm font-medium mb-1 flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>
+                        <Settings className="h-4 w-4" />
+                        <span>Contraseña de Aplicación Gmail</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={business.gmailAppPass || ""}
+                        onChange={e => setBusiness({ ...business, gmailAppPass: e.target.value })}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
+                        placeholder="Contraseña de 16 caracteres"
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        * Necesitas generar una "Contraseña de aplicación" en tu cuenta de Google.
+                      </p>
                     </div>
                     <div>
                       <label className={cn("block text-sm font-medium mb-1 flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>

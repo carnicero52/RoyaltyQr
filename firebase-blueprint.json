@@ -16,6 +16,9 @@
         "cooldownHours": { "type": "integer", "description": "Minimum hours between purchases." },
         "ownerEmail": { "type": "string", "description": "Email of the business owner." },
         "telegramChatId": { "type": "string", "description": "Telegram chat ID for notifications." },
+        "telegramToken": { "type": "string", "description": "Telegram bot token." },
+        "gmailUser": { "type": "string", "description": "Gmail address for sending notifications." },
+        "gmailAppPass": { "type": "string", "description": "Gmail App Password." },
         "notificationsEnabled": { "type": "boolean", "description": "Whether notifications are enabled." },
         "currency": { "type": "string", "description": "Currency code (e.g., 'USD', 'ARS')." }
       },
