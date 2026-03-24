@@ -45,7 +45,7 @@ try {
   console.error("[Firebase] Initialization Error:", err);
   // Fallback to default app if named app fails
   try {
-    serverApp = admin.apps.length ? admin.app() : admin.initializeApp({ projectId: firebaseConfig.projectId });
+    serverApp = admin.apps.length ? admin.apps[0] : admin.initializeApp({ projectId: firebaseConfig.projectId });
     console.log("[Firebase] Fallback initialization successful");
   } catch (fallbackErr: any) {
     console.error("[Firebase] Fallback Initialization Error:", fallbackErr);
@@ -208,17 +208,22 @@ async function startServer() {
   // API Routes
   app.get("/api/health", (req, res) => {
     try {
-      res.json({ 
+      const healthData = { 
         status: "ok", 
         timestamp: new Date().toISOString(),
         env: process.env.NODE_ENV,
         firebaseInitialized: !!serverApp,
         firestoreInitialized: !!db,
         projectId: serverApp?.options?.projectId || "unknown",
-        databaseId: firebaseConfig.firestoreDatabaseId
-      });
+        databaseId: firebaseConfig.firestoreDatabaseId,
+        hasGmailEnv: !!(process.env.GMAIL_USER && process.env.GMAIL_PASS),
+        hasTelegramEnv: !!process.env.TELEGRAM_BOT_TOKEN
+      };
+      console.log("[Health Check] Status:", JSON.stringify(healthData));
+      res.json(healthData);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error("[Health Check] Error:", err);
+      res.status(500).json({ error: err.message, stack: err.stack });
     }
   });
 
@@ -270,8 +275,7 @@ async function startServer() {
       console.log(`[Scheduler] Checking for pending reminders at ${now}`);
       
       // Log current project/database context for debugging
-      const activeApp = admin.app();
-      console.log(`[Scheduler] Active Project: ${activeApp.options.projectId}`);
+      console.log(`[Scheduler] Active Project: ${serverApp?.options?.projectId || "unknown"}`);
       console.log(`[Scheduler] Target Database: ${firebaseConfig.firestoreDatabaseId}`);
 
       // Query only by status to avoid needing a composite index on collectionGroup
