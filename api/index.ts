@@ -1,78 +1,50 @@
 import dotenv from "dotenv";
-import firebaseConfig from "../firebase-applet-config.json";
-
-// Force environment variables BEFORE any other imports
-dotenv.config();
-process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
-process.env.GCLOUD_PROJECT = firebaseConfig.projectId;
-process.env.FIRESTORE_PROJECT_ID = firebaseConfig.projectId;
-
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import cors from "cors";
 import nodemailer from "nodemailer";
 import TelegramBot from "node-telegram-bot-api";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
-// Initialize Firebase Admin with a named app for the server
+// Load config using fs for better ESM compatibility
+const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+
+// Force environment variables BEFORE any other imports
+process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
+process.env.GCLOUD_PROJECT = firebaseConfig.projectId;
+process.env.FIRESTORE_PROJECT_ID = firebaseConfig.projectId;
+
+dotenv.config();
+
+// Initialize Firebase Admin
 let serverApp: admin.app.App | null = null;
 try {
-  console.log("[Firebase] Environment Check:");
-  console.log("- GOOGLE_CLOUD_PROJECT:", process.env.GOOGLE_CLOUD_PROJECT);
-  console.log("- GCLOUD_PROJECT:", process.env.GCLOUD_PROJECT);
-  console.log("- Config Project ID:", firebaseConfig.projectId);
-  console.log("- Config Database ID:", firebaseConfig.firestoreDatabaseId);
-
-  // Use a named app to be absolutely sure we use our config
-  const appName = "fideliza-server";
-  const existingApp = admin.apps.find(app => app?.name === appName);
-  
-  if (existingApp) {
-    serverApp = existingApp;
-    console.log(`[Firebase] Using existing named app: ${appName}`);
-  } else {
-    console.log(`[Firebase] Initializing named Admin SDK app: ${appName} for project: ${firebaseConfig.projectId}`);
+  if (admin.apps.length === 0) {
     serverApp = admin.initializeApp({
       projectId: firebaseConfig.projectId,
-      credential: admin.credential.applicationDefault(),
-    }, appName);
+    });
+    console.log("[Firebase] Admin SDK initialized (Default App)");
+  } else {
+    serverApp = admin.app();
+    console.log("[Firebase] Using existing Admin SDK app");
   }
-  
-  console.log(`[Firebase] Admin SDK initialized. Active Project ID: ${serverApp.options.projectId}`);
 } catch (err: any) {
   console.error("[Firebase] Initialization Error:", err);
-  // Fallback to default app if named app fails
-  try {
-    serverApp = admin.apps.length ? admin.apps[0] : admin.initializeApp({ projectId: firebaseConfig.projectId });
-    console.log("[Firebase] Fallback initialization successful");
-  } catch (fallbackErr: any) {
-    console.error("[Firebase] Fallback Initialization Error:", fallbackErr);
-    serverApp = null;
-  }
 }
 
 // Initialize Firestore
 let db: admin.firestore.Firestore | null = null;
 if (serverApp) {
   try {
-    // Try with explicit database ID first
-    if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
-      db = getFirestore(serverApp, firebaseConfig.firestoreDatabaseId);
-      console.log(`[Firebase] Firestore initialized with Database ID: ${firebaseConfig.firestoreDatabaseId}`);
-    } else {
-      db = getFirestore(serverApp);
-      console.log(`[Firebase] Firestore initialized with (default) database`);
-    }
-  } catch (err) {
-    console.error(`[Firebase] Firestore Initialization Error:`, err);
-    try {
-      db = getFirestore(serverApp); // Last resort fallback
-    } catch (lastErr) {
-      console.error(`[Firebase] Last resort Firestore Initialization Error:`, lastErr);
-      db = null;
-    }
+    const dbId = firebaseConfig.firestoreDatabaseId;
+    db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
+    console.log(`[Firebase] Firestore initialized (DB: ${dbId || 'default'})`);
+  } catch (err: any) {
+    console.error("[Firebase] Firestore Initialization Error:", err);
   }
 }
 
@@ -90,16 +62,20 @@ app.get("/api/health", (req, res) => {
       firebaseInitialized: !!serverApp,
       firestoreInitialized: !!db,
       projectId: serverApp?.options?.projectId || "unknown",
-      databaseId: firebaseConfig.firestoreDatabaseId,
+      databaseId: firebaseConfig?.firestoreDatabaseId || "none",
       hasGmailEnv: !!(process.env.GMAIL_USER && process.env.GMAIL_PASS),
       hasTelegramEnv: !!process.env.TELEGRAM_BOT_TOKEN
     };
-    console.log("[Health Check] Status:", JSON.stringify(healthData));
     res.json(healthData);
   } catch (err: any) {
-    console.error("[Health Check] Error:", err);
-    res.status(500).json({ error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message || "Unknown error in health check" });
   }
+});
+
+// Global error handler
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("[Global Error]", err);
+  res.status(500).json({ error: err.message || "Internal Server Error" });
 });
 
 async function startServer() {
