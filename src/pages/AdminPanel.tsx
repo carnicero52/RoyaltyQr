@@ -635,8 +635,8 @@ export default function AdminPanel() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Perfil del Negocio</h1>
-                  <p className="text-gray-500 mt-1">Configura la identidad de tu marca.</p>
+                  <h1 className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Perfil del Negocio</h1>
+                  <p className={cn("mt-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Configura la identidad de tu marca.</p>
                 </div>
                 <button
                   onClick={handleSaveConfig}
@@ -648,69 +648,99 @@ export default function AdminPanel() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
-                  <h2 className="text-xl font-bold flex items-center space-x-2"><Settings className="h-5 w-5 text-orange-600" /><span>Información General</span></h2>
+                <div className={cn(
+                  "p-8 rounded-3xl shadow-sm border space-y-6 transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <h2 className={cn("text-xl font-bold flex items-center space-x-2", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                    <Settings className="h-5 w-5 text-orange-600" />
+                    <span>Información General</span>
+                  </h2>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Negocio</label>
+                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Nombre del Negocio</label>
                       <input
                         type="text"
                         value={business.name}
                         onChange={e => setBusiness({ ...business, name: e.target.value })}
-                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
                         placeholder="Ej: Café Central"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Eslogan / Frase corta</label>
+                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Eslogan / Frase corta</label>
                       <input
                         type="text"
                         value={business.slogan || ""}
                         onChange={e => setBusiness({ ...business, slogan: e.target.value })}
-                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
                         placeholder="Ej: El mejor café de la ciudad"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Descripción del Negocio</label>
+                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Descripción del Negocio</label>
                       <textarea
                         value={business.description || ""}
                         onChange={e => setBusiness({ ...business, description: e.target.value })}
                         rows={3}
-                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
                         placeholder="Cuéntale a tus clientes sobre tu negocio..."
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">URL del Logo</label>
+                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>URL del Logo</label>
                       <input
                         type="text"
                         value={business.logoUrl || ""}
                         onChange={e => setBusiness({ ...business, logoUrl: e.target.value })}
-                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
                         placeholder="https://ejemplo.com/logo.png"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Moneda</label>
+                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Moneda</label>
                       <input
                         type="text"
                         value={business.currency || "USD"}
                         onChange={e => setBusiness({ ...business, currency: e.target.value })}
-                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
                         placeholder="USD, ARS, EUR..."
                       />
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6">
-                  <h2 className="text-xl font-bold flex items-center space-x-2"><Bell className="h-5 w-5 text-orange-600" /><span>Notificaciones y Contacto</span></h2>
+                <div className={cn(
+                  "p-8 rounded-3xl shadow-sm border space-y-6 transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <h2 className={cn("text-xl font-bold flex items-center space-x-2", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                    <Bell className="h-5 w-5 text-orange-600" />
+                    <span>Notificaciones y Contacto</span>
+                  </h2>
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+                    <div className={cn(
+                      "flex items-center justify-between p-4 rounded-2xl transition-colors duration-300",
+                      business?.darkModeEnabled ? "bg-slate-800" : "bg-gray-50"
+                    )}>
                       <div>
-                        <p className="font-bold text-gray-900">Notificaciones de Actividad</p>
-                        <p className="text-xs text-gray-500">Alertas por nuevos sellos y premios.</p>
+                        <p className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Notificaciones de Actividad</p>
+                        <p className={cn("text-xs", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Alertas por nuevos sellos y premios.</p>
                       </div>
                       <button
                         onClick={() => setBusiness({ ...business, notificationsEnabled: !business.notificationsEnabled })}
@@ -723,29 +753,44 @@ export default function AdminPanel() {
                       </button>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center space-x-2"><Mail className="h-4 w-4" /><span>Email de Administrador</span></label>
+                      <label className={cn("block text-sm font-medium mb-1 flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>
+                        <Mail className="h-4 w-4" />
+                        <span>Email de Administrador</span>
+                      </label>
                       <input
                         type="email"
                         value={business.ownerEmail}
                         onChange={e => setBusiness({ ...business, ownerEmail: e.target.value })}
-                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center space-x-2"><Send className="h-4 w-4" /><span>Telegram Chat ID</span></label>
+                      <label className={cn("block text-sm font-medium mb-1 flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>
+                        <Send className="h-4 w-4" />
+                        <span>Telegram Chat ID</span>
+                      </label>
                       <input
                         type="text"
                         value={business.telegramChatId}
                         onChange={e => setBusiness({ ...business, telegramChatId: e.target.value })}
-                        className="w-full px-4 py-3 rounded-xl border-gray-200 border focus:ring-orange-500 focus:border-orange-500"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
                         placeholder="ID de chat para alertas"
                       />
                     </div>
 
-                    <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+                    <div className={cn(
+                      "flex items-center justify-between p-4 rounded-2xl transition-colors duration-300",
+                      business?.darkModeEnabled ? "bg-slate-800" : "bg-gray-50"
+                    )}>
                       <div>
-                        <p className="font-bold text-gray-900">WhatsApp (CallMeBot)</p>
-                        <p className="text-xs text-gray-500">Recibe alertas vía WhatsApp.</p>
+                        <p className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>WhatsApp (CallMeBot)</p>
+                        <p className={cn("text-xs", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Recibe alertas vía WhatsApp.</p>
                       </div>
                       <button
                         onClick={() => setBusiness({ ...business, whatsappEnabled: !business.whatsappEnabled })}
@@ -785,25 +830,37 @@ export default function AdminPanel() {
                   </div>
                 </div>
 
-                <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6 md:col-span-2">
-                  <h2 className="text-xl font-bold flex items-center space-x-2"><TrendingUp className="h-5 w-5 text-orange-600" /><span>Niveles de Fidelidad (Gamificación)</span></h2>
+                <div className={cn(
+                  "p-8 rounded-3xl shadow-sm border space-y-6 md:col-span-2 transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <h2 className={cn("text-xl font-bold flex items-center space-x-2", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                    <TrendingUp className="h-5 w-5 text-orange-600" />
+                    <span>Niveles de Fidelidad (Gamificación)</span>
+                  </h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="p-6 bg-gray-50 rounded-2xl space-y-4 border border-gray-100">
-                      <div className="flex items-center space-x-2 text-gray-400">
-                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center font-bold text-xs">B</div>
+                    <div className={cn(
+                      "p-6 rounded-2xl space-y-4 border transition-colors duration-300",
+                      business?.darkModeEnabled ? "bg-slate-800 border-slate-700" : "bg-gray-50 border-gray-100"
+                    )}>
+                      <div className={cn("flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-400" : "text-gray-400")}>
+                        <div className={cn("w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs", business?.darkModeEnabled ? "bg-slate-700" : "bg-gray-200")}>B</div>
                         <span className="font-bold">Nivel Bronce (Base)</span>
                       </div>
-                      <p className="text-sm text-gray-500">Nivel inicial para todos los clientes nuevos.</p>
+                      <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Nivel inicial para todos los clientes nuevos.</p>
                     </div>
                     
-                    <div className="p-6 bg-orange-50 rounded-2xl space-y-4 border border-orange-100">
+                    <div className={cn(
+                      "p-6 rounded-2xl space-y-4 border transition-colors duration-300",
+                      business?.darkModeEnabled ? "bg-orange-950/20 border-orange-900/30" : "bg-orange-50 border-orange-100"
+                    )}>
                       <div className="flex items-center space-x-2 text-orange-600">
                         <div className="w-8 h-8 rounded-full bg-orange-200 flex items-center justify-center font-bold text-xs">S</div>
                         <span className="font-bold">Nivel Plata</span>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Gasto Mínimo ({business.currency})</label>
+                          <label className={cn("block text-xs font-medium mb-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Gasto Mínimo ({business.currency})</label>
                           <input
                             type="number"
                             value={business.levels?.silver.minSpent || 500}
@@ -814,11 +871,14 @@ export default function AdminPanel() {
                                 gold: business.levels?.gold || { minSpent: 1500, multiplier: 2 }
                               } 
                             })}
-                            className="w-full px-3 py-2 rounded-lg border-gray-200 border text-sm"
+                            className={cn(
+                              "w-full px-3 py-2 rounded-lg border text-sm transition-colors duration-300",
+                              business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                            )}
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Multiplicador Sellos</label>
+                          <label className={cn("block text-xs font-medium mb-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Multiplicador Sellos</label>
                           <input
                             type="number"
                             step="0.1"
@@ -830,20 +890,26 @@ export default function AdminPanel() {
                                 gold: business.levels?.gold || { minSpent: 1500, multiplier: 2 }
                               } 
                             })}
-                            className="w-full px-3 py-2 rounded-lg border-gray-200 border text-sm"
+                            className={cn(
+                              "w-full px-3 py-2 rounded-lg border text-sm transition-colors duration-300",
+                              business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                            )}
                           />
                         </div>
                       </div>
                     </div>
 
-                    <div className="p-6 bg-yellow-50 rounded-2xl space-y-4 border border-yellow-100">
+                    <div className={cn(
+                      "p-6 rounded-2xl space-y-4 border transition-colors duration-300",
+                      business?.darkModeEnabled ? "bg-yellow-950/20 border-yellow-900/30" : "bg-yellow-50 border-yellow-100"
+                    )}>
                       <div className="flex items-center space-x-2 text-yellow-600">
                         <div className="w-8 h-8 rounded-full bg-yellow-200 flex items-center justify-center font-bold text-xs">G</div>
                         <span className="font-bold">Nivel Oro</span>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Gasto Mínimo ({business.currency})</label>
+                          <label className={cn("block text-xs font-medium mb-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Gasto Mínimo ({business.currency})</label>
                           <input
                             type="number"
                             value={business.levels?.gold.minSpent || 1500}
@@ -854,11 +920,14 @@ export default function AdminPanel() {
                                 gold: { minSpent: parseFloat(e.target.value), multiplier: business.levels?.gold.multiplier || 2 }
                               } 
                             })}
-                            className="w-full px-3 py-2 rounded-lg border-gray-200 border text-sm"
+                            className={cn(
+                              "w-full px-3 py-2 rounded-lg border text-sm transition-colors duration-300",
+                              business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                            )}
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Multiplicador Sellos</label>
+                          <label className={cn("block text-xs font-medium mb-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Multiplicador Sellos</label>
                           <input
                             type="number"
                             step="0.1"
@@ -870,7 +939,10 @@ export default function AdminPanel() {
                                 gold: { minSpent: business.levels?.gold.minSpent || 1500, multiplier: parseFloat(e.target.value) }
                               } 
                             })}
-                            className="w-full px-3 py-2 rounded-lg border-gray-200 border text-sm"
+                            className={cn(
+                              "w-full px-3 py-2 rounded-lg border text-sm transition-colors duration-300",
+                              business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                            )}
                           />
                         </div>
                       </div>
@@ -878,28 +950,40 @@ export default function AdminPanel() {
                   </div>
                 </div>
 
-                <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-6 md:col-span-2">
-                  <h2 className="text-xl font-bold flex items-center space-x-2"><Palette className="h-5 w-5 text-orange-600" /><span>Apariencia y Estilo</span></h2>
+                <div className={cn(
+                  "p-8 rounded-3xl shadow-sm border space-y-6 md:col-span-2 transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <h2 className={cn("text-xl font-bold flex items-center space-x-2", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                    <Palette className="h-5 w-5 text-orange-600" />
+                    <span>Apariencia y Estilo</span>
+                  </h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div className="space-y-4">
-                      <label className="block text-sm font-medium text-gray-700">Color de Marca Principal</label>
+                      <label className={cn("block text-sm font-medium", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Color de Marca Principal</label>
                       <div className="flex items-center space-x-4">
                         <input 
                           type="color" 
                           value={business.themeColor || "#ea580c"}
                           onChange={(e) => setBusiness({ ...business, themeColor: e.target.value })}
-                          className="h-12 w-20 rounded-lg cursor-pointer border-2 border-gray-100"
+                          className={cn(
+                            "h-12 w-20 rounded-lg cursor-pointer border-2 transition-colors duration-300",
+                            business?.darkModeEnabled ? "border-slate-700" : "border-gray-100"
+                          )}
                         />
                         <div className="flex-1">
                           <input 
                             type="text" 
                             value={business.themeColor || "#ea580c"}
                             onChange={(e) => setBusiness({ ...business, themeColor: e.target.value })}
-                            className="w-full px-4 py-2 rounded-xl border-gray-200 border font-mono text-sm"
+                            className={cn(
+                              "w-full px-4 py-2 rounded-xl border font-mono text-sm transition-colors duration-300",
+                              business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                            )}
                           />
                         </div>
                       </div>
-                      <p className="text-xs text-gray-500">Este color se aplicará a los botones y elementos destacados en el panel público.</p>
+                      <p className={cn("text-xs", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Este color se aplicará a los botones y elementos destacados en el panel público.</p>
                     </div>
 
                     <div className={cn(
@@ -1160,11 +1244,14 @@ export default function AdminPanel() {
           {activeTab === "qr" && business && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center space-y-8">
               <div className="text-center">
-                <h1 className="text-3xl font-bold text-gray-900">Código QR</h1>
-                <p className="text-gray-500 mt-1">Imprime este código QR para que tus clientes lo escaneen.</p>
+                <h1 className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Código QR</h1>
+                <p className={cn("mt-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Imprime este código QR para que tus clientes lo escaneen.</p>
               </div>
 
-              <div className="bg-white p-12 rounded-[3rem] shadow-2xl border border-gray-100 flex flex-col items-center space-y-8">
+              <div className={cn(
+                "p-12 rounded-[3rem] shadow-2xl border flex flex-col items-center space-y-8 transition-colors duration-300",
+                business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+              )}>
                 <div ref={qrRef} className="p-6 bg-white rounded-3xl border-4 border-orange-500 shadow-inner">
                   <QRCodeSVG 
                     value={`${window.location.origin}/negocio/${business.id}`} 
@@ -1174,8 +1261,8 @@ export default function AdminPanel() {
                   />
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-bold text-gray-900">{business.name}</p>
-                  <p className="text-gray-500 text-sm">¡Escanea para obtener recompensas!</p>
+                  <p className={cn("text-lg font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{business.name}</p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>¡Escanea para obtener recompensas!</p>
                 </div>
                 <button
                   onClick={downloadQR}
@@ -1186,7 +1273,7 @@ export default function AdminPanel() {
                 </button>
               </div>
 
-              <div className="max-w-md text-center text-gray-500 text-sm">
+              <div className={cn("max-w-md text-center text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>
                 <p>Consejo: Coloca este código QR cerca de tu caja registradora o en las mesas donde los clientes puedan verlo fácilmente.</p>
               </div>
             </motion.div>
@@ -1195,61 +1282,87 @@ export default function AdminPanel() {
           {/* Stats Tab */}
           {activeTab === "stats" && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
-              <h1 className="text-3xl font-bold text-gray-900">Estadísticas</h1>
+              <h1 className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Estadísticas</h1>
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                <div className={cn(
+                  "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
                   <div className="flex items-center justify-between mb-4">
                     <div className="p-3 bg-blue-50 rounded-2xl text-blue-600"><Users className="h-6 w-6" /></div>
                     <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">Total</span>
                   </div>
-                  <p className="text-3xl font-bold text-gray-900">{stats.totalCustomers}</p>
-                  <p className="text-sm text-gray-500">Clientes</p>
+                  <p className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{stats.totalCustomers}</p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Clientes</p>
                 </div>
-                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                <div className={cn(
+                  "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
                   <div className="flex items-center justify-between mb-4">
                     <div className="p-3 bg-orange-50 rounded-2xl text-orange-600"><TrendingUp className="h-6 w-6" /></div>
                     <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-lg">+12%</span>
                   </div>
-                  <p className="text-3xl font-bold text-gray-900">{stats.totalPurchases}</p>
-                  <p className="text-sm text-gray-500">Sellos Totales</p>
+                  <p className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{stats.totalPurchases}</p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Sellos Totales</p>
                 </div>
-                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                <div className={cn(
+                  "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
                   <div className="flex items-center justify-between mb-4">
                     <div className="p-3 bg-green-50 rounded-2xl text-green-600"><Gift className="h-6 w-6" /></div>
                     <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-lg">Listos</span>
                   </div>
-                  <p className="text-3xl font-bold text-gray-900">{stats.rewardsReached}</p>
-                  <p className="text-sm text-gray-500">Premios Alcanzados</p>
+                  <p className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{stats.rewardsReached}</p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Premios Alcanzados</p>
                 </div>
-                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                <div className={cn(
+                  "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
                   <div className="flex items-center justify-between mb-4">
                     <div className="p-3 bg-purple-50 rounded-2xl text-purple-600"><TrendingUp className="h-6 w-6" /></div>
                     <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded-lg">Prom</span>
                   </div>
-                  <p className="text-3xl font-bold text-gray-900">{stats.avgPurchases}</p>
-                  <p className="text-sm text-gray-500">Sellos por Cliente</p>
+                  <p className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{stats.avgPurchases}</p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Sellos por Cliente</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <h2 className="text-xl font-bold mb-6">Actividad de Sellos (Últimos 7 Días)</h2>
+                <div className={cn(
+                  "p-8 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <h2 className={cn("text-xl font-bold mb-6", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Actividad de Sellos (Últimos 7 Días)</h2>
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="date" axisLine={false} tickLine={false} />
-                        <YAxis axisLine={false} tickLine={false} />
-                        <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={business?.darkModeEnabled ? "#334155" : "#e2e8f0"} />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: business?.darkModeEnabled ? "#94a3b8" : "#64748b" }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: business?.darkModeEnabled ? "#94a3b8" : "#64748b" }} />
+                        <Tooltip 
+                          contentStyle={{ 
+                            borderRadius: '16px', 
+                            border: 'none', 
+                            boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                            backgroundColor: business?.darkModeEnabled ? '#1e293b' : '#ffffff',
+                            color: business?.darkModeEnabled ? '#ffffff' : '#000000'
+                          }} 
+                        />
                         <Bar dataKey="count" fill="#f97316" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
 
-                <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                  <h2 className="text-xl font-bold mb-6">Progreso de Clientes</h2>
+                <div className={cn(
+                  "p-8 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <h2 className={cn("text-xl font-bold mb-6", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Progreso de Clientes</h2>
                   <div className="h-64 flex items-center justify-center">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -1264,14 +1377,22 @@ export default function AdminPanel() {
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip />
+                        <Tooltip 
+                          contentStyle={{ 
+                            borderRadius: '16px', 
+                            border: 'none', 
+                            boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                            backgroundColor: business?.darkModeEnabled ? '#1e293b' : '#ffffff',
+                            color: business?.darkModeEnabled ? '#ffffff' : '#000000'
+                          }} 
+                        />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="flex flex-col space-y-2 ml-4">
                       {pieData.map((entry, index) => (
                         <div key={entry.name} className="flex items-center space-x-2">
                           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index] }}></div>
-                          <span className="text-xs text-gray-500">{entry.name}: {entry.value}</span>
+                          <span className={cn("text-xs", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>{entry.name}: {entry.value}</span>
                         </div>
                       ))}
                     </div>
