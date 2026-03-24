@@ -1,22 +1,67 @@
+import dotenv from "dotenv";
+import firebaseConfig from "../firebase-applet-config.json";
+
+// Force environment variables BEFORE any other imports
+dotenv.config();
+process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
+process.env.GCLOUD_PROJECT = firebaseConfig.projectId;
+process.env.FIRESTORE_PROJECT_ID = firebaseConfig.projectId;
+
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import cors from "cors";
 import nodemailer from "nodemailer";
 import TelegramBot from "node-telegram-bot-api";
-import dotenv from "dotenv";
 import admin from "firebase-admin";
+import { getFirestore } from "firebase-admin/firestore";
 
-dotenv.config();
+// Initialize Firebase Admin with a named app for the server
+let serverApp: admin.app.App;
+try {
+  console.log("[Firebase] Environment Check:");
+  console.log("- GOOGLE_CLOUD_PROJECT:", process.env.GOOGLE_CLOUD_PROJECT);
+  console.log("- GCLOUD_PROJECT:", process.env.GCLOUD_PROJECT);
+  console.log("- Config Project ID:", firebaseConfig.projectId);
+  console.log("- Config Database ID:", firebaseConfig.firestoreDatabaseId);
 
-// Initialize Firebase Admin
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-  });
+  // Use a named app to be absolutely sure we use our config
+  const appName = "fideliza-server";
+  const existingApp = admin.apps.find(app => app?.name === appName);
+  
+  if (existingApp) {
+    serverApp = existingApp;
+    console.log(`[Firebase] Using existing named app: ${appName}`);
+  } else {
+    console.log(`[Firebase] Initializing named Admin SDK app: ${appName} for project: ${firebaseConfig.projectId}`);
+    serverApp = admin.initializeApp({
+      projectId: firebaseConfig.projectId,
+      credential: admin.credential.applicationDefault(),
+    }, appName);
+  }
+  
+  console.log(`[Firebase] Admin SDK initialized. Active Project ID: ${serverApp.options.projectId}`);
+} catch (err) {
+  console.error("[Firebase] Initialization Error:", err);
+  // Fallback to default app if named app fails
+  serverApp = admin.apps.length ? admin.app() : admin.initializeApp({ projectId: firebaseConfig.projectId });
 }
 
-const db = admin.firestore();
+// Initialize Firestore
+let db: admin.firestore.Firestore;
+try {
+  // Try with explicit database ID first
+  if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
+    db = getFirestore(serverApp, firebaseConfig.firestoreDatabaseId);
+    console.log(`[Firebase] Firestore initialized with Database ID: ${firebaseConfig.firestoreDatabaseId}`);
+  } else {
+    db = getFirestore(serverApp);
+    console.log(`[Firebase] Firestore initialized with (default) database`);
+  }
+} catch (err) {
+  console.error(`[Firebase] Firestore Initialization Error:`, err);
+  db = getFirestore(serverApp); // Last resort fallback
+}
 
 const app = express();
 
@@ -37,7 +82,9 @@ async function startServer() {
 
   // Notification Logic
   const sendNotification = async ({ type, data, config, message: customMessage, subject: customSubject, toEmail, toPhone, toTelegram }: any) => {
+    const results: any = { email: null, telegram: null, whatsapp: null };
     console.log(`[Notification] Attempting to send ${type} to ${toEmail || toPhone || toTelegram || 'unknown'}`);
+    
     const message = customMessage || `
       🔔 Fideliza Notification: ${type}
       
@@ -47,71 +94,153 @@ async function startServer() {
 
     const subject = customSubject || `Fideliza: ${type}`;
 
-    try {
-      // Email Notification
-      if (config.email && (toEmail || config.email)) {
-        if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
-          console.log(`[Notification] Sending Email to ${toEmail || config.email}`);
+    // Email Notification
+    const emailTarget = toEmail || config.email;
+    if (emailTarget) {
+      if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
+        try {
+          console.log(`[Notification] Sending Email to ${emailTarget}`);
           await transporter.sendMail({
             from: process.env.GMAIL_USER,
-            to: toEmail || config.email,
+            to: emailTarget,
             subject: subject,
             text: message,
           });
-        } else {
-          console.warn("[Notification] GMAIL_USER or GMAIL_PASS not set, skipping email");
+          results.email = { success: true };
+        } catch (err: any) {
+          console.error("[Notification] Email Error:", err);
+          results.email = { success: false, error: err.message };
         }
+      } else {
+        console.warn("[Notification] GMAIL_USER or GMAIL_PASS not set, skipping email");
+        results.email = { success: false, error: "Server credentials not configured" };
       }
+    }
 
-      // Telegram Notification
-      if (config.telegram && (toTelegram || config.telegramChatId || process.env.TELEGRAM_CHAT_ID)) {
-        const token = config.telegramToken || process.env.TELEGRAM_BOT_TOKEN;
-        const chatId = toTelegram || config.telegramChatId || process.env.TELEGRAM_CHAT_ID;
-        if (token && chatId) {
+    // Telegram Notification
+    // config.telegram is a boolean indicating if it's enabled for the business
+    if (config.telegram || toTelegram) {
+      const token = config.telegramToken || process.env.TELEGRAM_BOT_TOKEN;
+      const chatId = toTelegram || config.telegramChatId || process.env.TELEGRAM_CHAT_ID;
+      
+      if (token && chatId) {
+        try {
           console.log(`[Notification] Sending Telegram to ${chatId}`);
           const tBot = new TelegramBot(token, { polling: false });
           await tBot.sendMessage(chatId, message);
-        } else {
-          console.warn("[Notification] Telegram token or chatId not set, skipping telegram");
+          results.telegram = { success: true };
+        } catch (err: any) {
+          console.error("[Notification] Telegram Error:", err);
+          results.telegram = { success: false, error: err.message };
         }
+      } else {
+        console.warn("[Notification] Telegram token or chatId not set, skipping telegram");
+        results.telegram = { success: false, error: "Telegram credentials not configured" };
       }
+    }
 
-      // WhatsApp Notification (CallMeBot)
-      if (config.whatsapp && (toPhone || config.whatsappPhone) && config.whatsappApiKey) {
-        const phone = toPhone || config.whatsappPhone;
-        console.log(`[Notification] Sending WhatsApp to ${phone}`);
-        const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${config.whatsappApiKey}`;
-        await fetch(url);
+    // WhatsApp Notification (CallMeBot)
+    if (config.whatsapp || toPhone) {
+      const phone = toPhone || config.whatsappPhone;
+      const apiKey = config.whatsappApiKey;
+      
+      if (phone && apiKey) {
+        try {
+          console.log(`[Notification] Sending WhatsApp to ${phone}`);
+          const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            results.whatsapp = { success: true };
+          } else {
+            const text = await response.text();
+            results.whatsapp = { success: false, error: `CallMeBot returned ${response.status}: ${text}` };
+          }
+        } catch (err: any) {
+          console.error("[Notification] WhatsApp Error:", err);
+          results.whatsapp = { success: false, error: err.message };
+        }
       } else if (config.whatsapp) {
         console.warn("[Notification] WhatsApp phone or apiKey not set, skipping whatsapp");
+        results.whatsapp = { success: false, error: "WhatsApp credentials not configured" };
       }
-
-      return { success: true };
-    } catch (error) {
-      console.error("[Notification] Error:", error);
-      throw error;
     }
+
+    return results;
+  };
+
+  // Helper for Firestore error diagnostics
+  const handleFirestoreError = (error: any, operationType: string, path: string | null) => {
+    const errInfo = {
+      error: error.message || String(error),
+      code: error.code,
+      operationType,
+      path,
+      projectId: admin.app().options.projectId,
+      databaseId: firebaseConfig.firestoreDatabaseId,
+      envProject: process.env.GOOGLE_CLOUD_PROJECT
+    };
+    console.error(`[Firestore Error] ${JSON.stringify(errInfo, null, 2)}`);
+    return error;
   };
 
   // API Routes
+  app.get("/api/test-db", async (req, res) => {
+    const path = "businesses";
+    try {
+      console.log("[Test DB] Attempting to fetch businesses collection...");
+      const snapshot = await db.collection(path).limit(1).get();
+      res.json({ 
+        success: true, 
+        message: "Firestore connection successful", 
+        count: snapshot.docs.length,
+        projectId: serverApp.options.projectId || "unknown",
+        databaseId: firebaseConfig.firestoreDatabaseId,
+        configProjectId: firebaseConfig.projectId,
+        appName: serverApp.name
+      });
+    } catch (error: any) {
+      handleFirestoreError(error, "get", path);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message,
+        projectId: serverApp.options.projectId || "unknown",
+        databaseId: firebaseConfig.firestoreDatabaseId,
+        configProjectId: firebaseConfig.projectId,
+        appName: serverApp.name
+      });
+    }
+  });
+
   app.post("/api/notify", async (req, res) => {
     try {
-      await sendNotification(req.body);
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to send notification" });
+      const results = await sendNotification(req.body);
+      res.json({ success: true, results });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
   // Simple Scheduler for Reminders
-  setInterval(async () => {
+  const checkReminders = async () => {
     const now = new Date().toISOString();
-    console.log(`[Scheduler] Checking for pending reminders at ${now}`);
     try {
+      console.log(`[Scheduler] Checking for pending reminders at ${now}`);
+      
+      // Log current project/database context for debugging
+      const activeApp = admin.app();
+      console.log(`[Scheduler] Active Project: ${activeApp.options.projectId}`);
+      console.log(`[Scheduler] Target Database: ${firebaseConfig.firestoreDatabaseId}`);
+
       // Query only by status to avoid needing a composite index on collectionGroup
-      const remindersSnapshot = await db.collectionGroup("reminders")
-        .where("status", "==", "pending")
-        .get();
+      const path = "reminders (collectionGroup)";
+      let remindersSnapshot;
+      try {
+        remindersSnapshot = await db.collectionGroup("reminders")
+          .where("status", "==", "pending")
+          .get();
+      } catch (err) {
+        throw handleFirestoreError(err, "collectionGroupQuery", path);
+      }
 
       console.log(`[Scheduler] Found ${remindersSnapshot.docs.length} pending reminders total`);
 
@@ -144,6 +273,9 @@ async function startServer() {
         };
 
         try {
+          let anySuccess = false;
+          let errors: string[] = [];
+
           // If reminder has specific customers, send to them
           if (reminder.customerIds && reminder.customerIds.length > 0) {
             console.log(`[Scheduler] Sending reminder ${doc.id} to ${reminder.customerIds.length} customers`);
@@ -151,7 +283,7 @@ async function startServer() {
               const customerDoc = await db.collection("businesses").doc(reminder.businessId).collection("customers").doc(customerId).get();
               const customer = customerDoc.data();
               if (customer) {
-                await sendNotification({
+                const results = await sendNotification({
                   type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
                   message: reminder.message,
                   subject: reminder.subject,
@@ -159,31 +291,63 @@ async function startServer() {
                   toEmail: customer.email,
                   toPhone: customer.phone,
                 });
+                
+                Object.entries(results).forEach(([method, res]: [string, any]) => {
+                  if (res) {
+                    if (res.success) anySuccess = true;
+                    else errors.push(`${customer.name || customer.phone} (${method}): ${res.error}`);
+                  }
+                });
               }
             }
           } else {
             console.log(`[Scheduler] Sending reminder ${doc.id} to business owner`);
             // Send to business owner if no specific customers
-            await sendNotification({
+            const results = await sendNotification({
               type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
               message: reminder.message,
               subject: reminder.subject,
               config,
             });
+            Object.entries(results).forEach(([method, res]: [string, any]) => {
+              if (res) {
+                if (res.success) anySuccess = true;
+                else errors.push(`Owner (${method}): ${res.error}`);
+              }
+            });
           }
 
           // Update status
-          await doc.ref.update({ status: "sent" });
-          console.log(`[Scheduler] Reminder ${doc.id} marked as sent`);
-        } catch (sendError) {
+          const statusMessage = errors.length > 0 ? [...new Set(errors)].join(", ") : undefined;
+          if (anySuccess) {
+            await doc.ref.update({ 
+              status: "sent",
+              statusMessage: statusMessage
+            });
+            console.log(`[Scheduler] Reminder ${doc.id} marked as sent ${statusMessage ? 'with warnings' : ''}`);
+          } else {
+            await doc.ref.update({ 
+              status: "failed",
+              statusMessage: statusMessage || "No se pudo enviar por ningún medio"
+            });
+            console.warn(`[Scheduler] Reminder ${doc.id} marked as failed: ${statusMessage}`);
+          }
+        } catch (sendError: any) {
           console.error(`[Scheduler] Failed to send reminder ${doc.id}:`, sendError);
-          await doc.ref.update({ status: "failed" });
+          await doc.ref.update({ 
+            status: "failed",
+            statusMessage: sendError.message
+          });
         }
       }
     } catch (error) {
       console.error("[Scheduler] Error in interval:", error);
     }
-  }, 60000); // Check every minute
+  };
+
+  // Run once on startup and then every minute
+  checkReminders();
+  setInterval(checkReminders, 60000);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {

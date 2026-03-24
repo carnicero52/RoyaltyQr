@@ -46,6 +46,7 @@ export interface Reminder {
   message: string;
   scheduledAt: string;
   status: 'pending' | 'sent' | 'failed';
+  statusMessage?: string;
 }
 
 export interface Customer {

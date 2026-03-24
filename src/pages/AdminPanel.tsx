@@ -29,7 +29,7 @@ export default function AdminPanel() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [status, setStatus] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isEditingCustomer, setIsEditingCustomer] = useState<Customer | null>(null);
   const [isAddingCustomer, setIsAddingCustomer] = useState(false);
@@ -248,39 +248,77 @@ export default function AdminPanel() {
         whatsappApiKey: business.whatsappApiKey,
       };
 
+      let anySuccess = false;
+      let errors: string[] = [];
+
       for (const cust of targetCustomers) {
-        await fetch("/api/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: reminderForm.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
-            message: reminderForm.message,
-            subject: reminderForm.subject,
-            config,
-            toEmail: cust.email,
-            toPhone: cust.phone,
-          }),
-        });
+        try {
+          const response = await fetch("/api/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: reminderForm.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
+              message: reminderForm.message,
+              subject: reminderForm.subject,
+              config,
+              toEmail: cust.email,
+              toPhone: cust.phone,
+            }),
+          });
+          const data = await response.json();
+          if (data.success && data.results) {
+            Object.entries(data.results).forEach(([method, res]: [string, any]) => {
+              if (res) {
+                if (res.success) {
+                  anySuccess = true;
+                } else {
+                  errors.push(`${cust.name || cust.phone} (${method}): ${res.error}`);
+                }
+              }
+            });
+          } else if (!data.success) {
+            errors.push(`${cust.name || cust.phone}: ${data.error || "Error de servidor"}`);
+          }
+        } catch (err) {
+          errors.push(`${cust.name || cust.phone}: Error de red`);
+        }
       }
 
-      // Also save to history as 'sent'
+      // Also save to history
+      const statusMessage = errors.length > 0 ? [...new Set(errors)].join(", ") : undefined;
       const reminderData: Omit<Reminder, 'id'> = {
         businessId: business.id,
         ...reminderForm,
         scheduledAt: new Date().toISOString(),
         customerIds: selectedCustomers,
-        status: "sent"
+        status: anySuccess ? "sent" : "failed",
+        statusMessage: statusMessage
       };
       await addDoc(collection(db, "businesses", business.id, "reminders"), reminderData);
 
-      setStatus({ message: "¡Notificaciones enviadas con éxito!", type: 'success' });
-      setReminderForm({
-        subject: "",
-        message: "",
-        scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-        type: "marketing"
-      });
-      setSelectedCustomers([]);
+      if (anySuccess) {
+        setStatus({ 
+          message: errors.length > 0 
+            ? `Enviado con algunos errores: ${statusMessage}` 
+            : "¡Notificaciones enviadas con éxito!", 
+          type: errors.length > 0 ? 'warning' : 'success' 
+        });
+      } else {
+        setStatus({ 
+          message: `Error al enviar: ${statusMessage || "No se pudo enviar por ningún medio"}`, 
+          type: 'error' 
+        });
+      }
+
+      if (anySuccess) {
+        setReminderForm({
+          subject: "",
+          message: "",
+          scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+          type: "marketing"
+        });
+        setSelectedCustomers([]);
+      }
     } catch (err) {
       console.error("Error sending notifications:", err);
       setStatus({ message: "Error al enviar notificaciones.", type: 'error' });
@@ -1876,15 +1914,22 @@ export default function AdminPanel() {
                                   {reminder.customerIds.length} clientes
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
-                                  <span className={cn(
-                                    "flex items-center space-x-1 text-xs font-medium",
-                                    reminder.status === "sent" ? "text-green-600" : 
-                                    reminder.status === "failed" ? "text-red-600" : "text-orange-600"
-                                  )}>
-                                    {reminder.status === "sent" ? <CheckCircle2 className="h-3 w-3" /> : 
-                                     reminder.status === "failed" ? <AlertCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
-                                    <span>{reminder.status === "sent" ? "Enviado" : reminder.status === "failed" ? "Fallido" : "Pendiente"}</span>
-                                  </span>
+                                  <div className="flex flex-col">
+                                    <span className={cn(
+                                      "flex items-center space-x-1 text-xs font-medium",
+                                      reminder.status === "sent" ? "text-green-600" : 
+                                      reminder.status === "failed" ? "text-red-600" : "text-orange-600"
+                                    )}>
+                                      {reminder.status === "sent" ? <CheckCircle2 className="h-3 w-3" /> : 
+                                       reminder.status === "failed" ? <AlertCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                                      <span>{reminder.status === "sent" ? "Enviado" : reminder.status === "failed" ? "Fallido" : "Pendiente"}</span>
+                                    </span>
+                                    {reminder.statusMessage && (
+                                      <span className="text-[10px] text-gray-400 truncate max-w-[150px]" title={reminder.statusMessage}>
+                                        {reminder.statusMessage}
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             ))
@@ -2213,6 +2258,28 @@ export default function AdminPanel() {
                 )}
               </div>
             </motion.div>
+          </motion.div>
+        )}
+
+        {status && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className={cn(
+              "fixed bottom-8 right-8 z-[100] p-4 rounded-2xl shadow-2xl flex items-center space-x-3 border backdrop-blur-md max-w-md",
+              status.type === 'success' ? "bg-green-50/90 border-green-200 text-green-800" :
+              status.type === 'warning' ? "bg-amber-50/90 border-amber-200 text-amber-800" :
+              "bg-red-50/90 border-red-200 text-red-800"
+            )}
+          >
+            {status.type === 'success' ? <CheckCircle2 className="h-6 w-6 text-green-600" /> :
+             status.type === 'warning' ? <AlertCircle className="h-6 w-6 text-amber-600" /> :
+             <AlertCircle className="h-6 w-6 text-red-600" />}
+            <p className="font-bold text-sm flex-1">{status.message}</p>
+            <button onClick={() => setStatus(null)} className="p-1 hover:bg-black/5 rounded-full transition-colors">
+              <X className="h-4 w-4" />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
