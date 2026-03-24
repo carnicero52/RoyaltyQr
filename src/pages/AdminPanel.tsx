@@ -845,6 +845,22 @@ export default function AdminPanel() {
                         placeholder="ID de chat para alertas"
                       />
                     </div>
+                    <div>
+                      <label className={cn("block text-sm font-medium mb-1 flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>
+                        <Bell className="h-4 w-4" />
+                        <span>Telegram Bot Token</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={business.telegramToken || ""}
+                        onChange={e => setBusiness({ ...business, telegramToken: e.target.value })}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border focus:ring-orange-500 focus:border-orange-500 transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
+                        placeholder="Token de tu Bot de Telegram"
+                      />
+                    </div>
 
                     <div className={cn(
                       "flex items-center justify-between p-4 rounded-2xl transition-colors duration-300",
