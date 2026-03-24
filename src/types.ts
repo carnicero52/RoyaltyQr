@@ -11,6 +11,7 @@ export interface Business {
   cooldownHours: number;
   ownerEmail?: string;
   telegramChatId?: string;
+  telegramToken?: string;
   notificationsEnabled: boolean;
   billingNotificationsEnabled?: boolean;
   marketingNotificationsEnabled?: boolean;

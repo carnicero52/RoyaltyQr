@@ -200,9 +200,11 @@ export default function AdminPanel() {
     if (!business) return;
     setSaving(true);
     try {
+      const scheduledDate = new Date(reminderForm.scheduledAt);
       const reminderData: Omit<Reminder, 'id'> = {
         businessId: business.id,
         ...reminderForm,
+        scheduledAt: scheduledDate.toISOString(),
         customerIds: selectedCustomers,
         status: "pending"
       };
@@ -222,6 +224,66 @@ export default function AdminPanel() {
       setSelectedCustomers([]);
     } catch (err) {
       console.error("Error scheduling reminder:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSendNow = async () => {
+    if (!business) return;
+    if (selectedCustomers.length === 0) {
+      setStatus({ message: "Selecciona al menos un cliente.", type: 'error' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const targetCustomers = customers.filter(c => selectedCustomers.includes(c.id));
+      const config = {
+        email: business.ownerEmail,
+        telegram: !!business.telegramChatId,
+        telegramToken: business.telegramToken,
+        telegramChatId: business.telegramChatId,
+        whatsapp: !!business.whatsappEnabled,
+        whatsappPhone: business.whatsappPhone,
+        whatsappApiKey: business.whatsappApiKey,
+      };
+
+      for (const cust of targetCustomers) {
+        await fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: reminderForm.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
+            message: reminderForm.message,
+            subject: reminderForm.subject,
+            config,
+            toEmail: cust.email,
+            toPhone: cust.phone,
+          }),
+        });
+      }
+
+      // Also save to history as 'sent'
+      const reminderData: Omit<Reminder, 'id'> = {
+        businessId: business.id,
+        ...reminderForm,
+        scheduledAt: new Date().toISOString(),
+        customerIds: selectedCustomers,
+        status: "sent"
+      };
+      await addDoc(collection(db, "businesses", business.id, "reminders"), reminderData);
+
+      setStatus({ message: "¡Notificaciones enviadas con éxito!", type: 'success' });
+      setReminderForm({
+        subject: "",
+        message: "",
+        scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        type: "marketing"
+      });
+      setSelectedCustomers([]);
+    } catch (err) {
+      console.error("Error sending notifications:", err);
+      setStatus({ message: "Error al enviar notificaciones.", type: 'error' });
     } finally {
       setSaving(false);
     }
@@ -1713,20 +1775,40 @@ export default function AdminPanel() {
                         </div>
                       </div>
 
-                      <button
-                        type="submit"
-                        disabled={saving || selectedCustomers.length === 0}
-                        className="w-full flex items-center justify-center space-x-2 bg-orange-600 text-white px-6 py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all disabled:opacity-50 shadow-lg shadow-orange-100"
-                      >
-                        {saving ? (
-                          <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div>
-                        ) : (
-                          <>
-                            <Clock className="h-5 w-5" />
-                            <span>Programar Notificación ({selectedCustomers.length} clientes)</span>
-                          </>
-                        )}
-                      </button>
+                      <div className="flex flex-col md:flex-row gap-4">
+                        <button
+                          type="submit"
+                          disabled={saving || selectedCustomers.length === 0}
+                          className="flex-1 flex items-center justify-center space-x-2 bg-orange-600 text-white px-6 py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all disabled:opacity-50 shadow-lg shadow-orange-100"
+                        >
+                          {saving ? (
+                            <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div>
+                          ) : (
+                            <>
+                              <Clock className="h-5 w-5" />
+                              <span>Programar Envío ({selectedCustomers.length})</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSendNow}
+                          disabled={saving || selectedCustomers.length === 0}
+                          className={cn(
+                            "flex-1 flex items-center justify-center space-x-2 px-6 py-4 rounded-2xl font-bold transition-all disabled:opacity-50 shadow-lg",
+                            business?.darkModeEnabled ? "bg-slate-800 text-white hover:bg-slate-700 shadow-slate-900" : "bg-white text-gray-900 hover:bg-gray-50 shadow-gray-200 border border-gray-100"
+                          )}
+                        >
+                          {saving ? (
+                            <div className="animate-spin h-5 w-5 border-b-2 border-orange-600 rounded-full"></div>
+                          ) : (
+                            <>
+                              <Send className="h-5 w-5 text-orange-600" />
+                              <span>Enviar Ahora ({selectedCustomers.length})</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </form>
                   </div>
 
