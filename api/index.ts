@@ -77,12 +77,33 @@ if (serverApp) {
 }
 
 const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Health check at top level to ensure it always works
+app.get("/api/health", (req, res) => {
+  try {
+    const healthData = { 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      env: process.env.NODE_ENV,
+      firebaseInitialized: !!serverApp,
+      firestoreInitialized: !!db,
+      projectId: serverApp?.options?.projectId || "unknown",
+      databaseId: firebaseConfig.firestoreDatabaseId,
+      hasGmailEnv: !!(process.env.GMAIL_USER && process.env.GMAIL_PASS),
+      hasTelegramEnv: !!process.env.TELEGRAM_BOT_TOKEN
+    };
+    console.log("[Health Check] Status:", JSON.stringify(healthData));
+    res.json(healthData);
+  } catch (err: any) {
+    console.error("[Health Check] Error:", err);
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
 
 async function startServer() {
   const PORT = 3000;
-
-  app.use(cors());
-  app.use(express.json());
 
   // Email Transporter
   const transporter = nodemailer.createTransport({
@@ -206,27 +227,6 @@ async function startServer() {
   };
 
   // API Routes
-  app.get("/api/health", (req, res) => {
-    try {
-      const healthData = { 
-        status: "ok", 
-        timestamp: new Date().toISOString(),
-        env: process.env.NODE_ENV,
-        firebaseInitialized: !!serverApp,
-        firestoreInitialized: !!db,
-        projectId: serverApp?.options?.projectId || "unknown",
-        databaseId: firebaseConfig.firestoreDatabaseId,
-        hasGmailEnv: !!(process.env.GMAIL_USER && process.env.GMAIL_PASS),
-        hasTelegramEnv: !!process.env.TELEGRAM_BOT_TOKEN
-      };
-      console.log("[Health Check] Status:", JSON.stringify(healthData));
-      res.json(healthData);
-    } catch (err: any) {
-      console.error("[Health Check] Error:", err);
-      res.status(500).json({ error: err.message, stack: err.stack });
-    }
-  });
-
   app.get("/api/test-db", async (req, res) => {
     const path = "businesses";
     try {

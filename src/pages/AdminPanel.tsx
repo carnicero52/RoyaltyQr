@@ -345,7 +345,8 @@ export default function AdminPanel() {
         const data = await response.json();
         alert(`Conexión exitosa. Servidor activo (Project: ${data.projectId})`);
       } else {
-        alert(`Error de conexión: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
+        alert(`Error de conexión: ${response.status} - ${errorData.error || "Sin detalles"}`);
       }
     } catch (err: any) {
       alert(`Error de red: ${err.message}`);
