@@ -17,7 +17,7 @@ import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
 // Initialize Firebase Admin with a named app for the server
-let serverApp: admin.app.App;
+let serverApp: admin.app.App | null = null;
 try {
   console.log("[Firebase] Environment Check:");
   console.log("- GOOGLE_CLOUD_PROJECT:", process.env.GOOGLE_CLOUD_PROJECT);
@@ -41,26 +41,39 @@ try {
   }
   
   console.log(`[Firebase] Admin SDK initialized. Active Project ID: ${serverApp.options.projectId}`);
-} catch (err) {
+} catch (err: any) {
   console.error("[Firebase] Initialization Error:", err);
   // Fallback to default app if named app fails
-  serverApp = admin.apps.length ? admin.app() : admin.initializeApp({ projectId: firebaseConfig.projectId });
+  try {
+    serverApp = admin.apps.length ? admin.app() : admin.initializeApp({ projectId: firebaseConfig.projectId });
+    console.log("[Firebase] Fallback initialization successful");
+  } catch (fallbackErr: any) {
+    console.error("[Firebase] Fallback Initialization Error:", fallbackErr);
+    serverApp = null;
+  }
 }
 
 // Initialize Firestore
-let db: admin.firestore.Firestore;
-try {
-  // Try with explicit database ID first
-  if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
-    db = getFirestore(serverApp, firebaseConfig.firestoreDatabaseId);
-    console.log(`[Firebase] Firestore initialized with Database ID: ${firebaseConfig.firestoreDatabaseId}`);
-  } else {
-    db = getFirestore(serverApp);
-    console.log(`[Firebase] Firestore initialized with (default) database`);
+let db: admin.firestore.Firestore | null = null;
+if (serverApp) {
+  try {
+    // Try with explicit database ID first
+    if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
+      db = getFirestore(serverApp, firebaseConfig.firestoreDatabaseId);
+      console.log(`[Firebase] Firestore initialized with Database ID: ${firebaseConfig.firestoreDatabaseId}`);
+    } else {
+      db = getFirestore(serverApp);
+      console.log(`[Firebase] Firestore initialized with (default) database`);
+    }
+  } catch (err) {
+    console.error(`[Firebase] Firestore Initialization Error:`, err);
+    try {
+      db = getFirestore(serverApp); // Last resort fallback
+    } catch (lastErr) {
+      console.error(`[Firebase] Last resort Firestore Initialization Error:`, lastErr);
+      db = null;
+    }
   }
-} catch (err) {
-  console.error(`[Firebase] Firestore Initialization Error:`, err);
-  db = getFirestore(serverApp); // Last resort fallback
 }
 
 const app = express();
@@ -184,7 +197,7 @@ async function startServer() {
       code: error.code,
       operationType,
       path,
-      projectId: admin.app().options.projectId,
+      projectId: serverApp?.options?.projectId || "unknown",
       databaseId: firebaseConfig.firestoreDatabaseId,
       envProject: process.env.GOOGLE_CLOUD_PROJECT
     };
@@ -194,38 +207,45 @@ async function startServer() {
 
   // API Routes
   app.get("/api/health", (req, res) => {
-    res.json({ 
-      status: "ok", 
-      timestamp: new Date().toISOString(),
-      env: process.env.NODE_ENV,
-      projectId: serverApp.options.projectId,
-      databaseId: firebaseConfig.firestoreDatabaseId
-    });
+    try {
+      res.json({ 
+        status: "ok", 
+        timestamp: new Date().toISOString(),
+        env: process.env.NODE_ENV,
+        firebaseInitialized: !!serverApp,
+        firestoreInitialized: !!db,
+        projectId: serverApp?.options?.projectId || "unknown",
+        databaseId: firebaseConfig.firestoreDatabaseId
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.get("/api/test-db", async (req, res) => {
     const path = "businesses";
     try {
+      if (!db) throw new Error("Firestore not initialized");
       console.log("[Test DB] Attempting to fetch businesses collection...");
       const snapshot = await db.collection(path).limit(1).get();
       res.json({ 
         success: true, 
         message: "Firestore connection successful", 
         count: snapshot.docs.length,
-        projectId: serverApp.options.projectId || "unknown",
+        projectId: serverApp?.options?.projectId || "unknown",
         databaseId: firebaseConfig.firestoreDatabaseId,
         configProjectId: firebaseConfig.projectId,
-        appName: serverApp.name
+        appName: serverApp?.name || "none"
       });
     } catch (error: any) {
       handleFirestoreError(error, "get", path);
       res.status(500).json({ 
         success: false, 
         error: error.message,
-        projectId: serverApp.options.projectId || "unknown",
+        projectId: serverApp?.options?.projectId || "unknown",
         databaseId: firebaseConfig.firestoreDatabaseId,
         configProjectId: firebaseConfig.projectId,
-        appName: serverApp.name
+        appName: serverApp?.name || "none"
       });
     }
   });
@@ -241,6 +261,10 @@ async function startServer() {
 
   // Simple Scheduler for Reminders
   const checkReminders = async () => {
+    if (!db) {
+      console.warn("[Scheduler] Skipping check: Firestore not initialized");
+      return;
+    }
     const now = new Date().toISOString();
     try {
       console.log(`[Scheduler] Checking for pending reminders at ${now}`);
