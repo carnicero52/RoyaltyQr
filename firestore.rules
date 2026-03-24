@@ -32,6 +32,14 @@ service cloud.firestore {
         allow create: if true; // Customers register purchases
         allow update, delete: if isAdmin();
       }
+
+      match /reminders/{reminderId} {
+        allow read, write: if isAdmin();
+      }
+
+      match /staff/{staffId} {
+        allow read, write: if isAdmin();
+      }
     }
 
     // User roles for admin access
