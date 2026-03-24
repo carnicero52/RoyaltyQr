@@ -193,6 +193,16 @@ async function startServer() {
   };
 
   // API Routes
+  app.get("/api/health", (req, res) => {
+    res.json({ 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      env: process.env.NODE_ENV,
+      projectId: serverApp.options.projectId,
+      databaseId: firebaseConfig.firestoreDatabaseId
+    });
+  });
+
   app.get("/api/test-db", async (req, res) => {
     const path = "businesses";
     try {
@@ -375,9 +385,9 @@ async function startServer() {
     });
   }
 
-  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+  if (!process.env.VERCEL) {
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`Server running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
     });
   }
 }

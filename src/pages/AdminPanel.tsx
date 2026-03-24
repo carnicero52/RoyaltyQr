@@ -255,7 +255,8 @@ export default function AdminPanel() {
 
       for (const cust of targetCustomers) {
         try {
-          const response = await fetch("/api/notify", {
+          console.log(`[Notification] Sending to ${cust.name || cust.phone}...`);
+          const response = await fetch(`${window.location.origin}/api/notify`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -267,6 +268,12 @@ export default function AdminPanel() {
               toPhone: cust.phone,
             }),
           });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Server returned ${response.status}: ${errorText}`);
+          }
+
           const data = await response.json();
           if (data.success && data.results) {
             Object.entries(data.results).forEach(([method, res]: [string, any]) => {
@@ -281,8 +288,9 @@ export default function AdminPanel() {
           } else if (!data.success) {
             errors.push(`${cust.name || cust.phone}: ${data.error || "Error de servidor"}`);
           }
-        } catch (err) {
-          errors.push(`${cust.name || cust.phone}: Error de red`);
+        } catch (err: any) {
+          console.error(`[Notification] Fetch Error for ${cust.name || cust.phone}:`, err);
+          errors.push(`${cust.name || cust.phone}: Error de red (${err.message})`);
         }
       }
 
@@ -324,6 +332,23 @@ export default function AdminPanel() {
     } catch (err) {
       console.error("Error sending notifications:", err);
       setStatus({ message: "Error al enviar notificaciones.", type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setSaving(true);
+    try {
+      const response = await fetch(`${window.location.origin}/api/health`);
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Conexión exitosa. Servidor activo (Project: ${data.projectId})`);
+      } else {
+        alert(`Error de conexión: ${response.status}`);
+      }
+    } catch (err: any) {
+      alert(`Error de red: ${err.message}`);
     } finally {
       setSaving(false);
     }
@@ -740,13 +765,23 @@ export default function AdminPanel() {
                   <h1 className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Perfil del Negocio</h1>
                   <p className={cn("mt-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Configura la identidad de tu marca.</p>
                 </div>
-                <button
-                  onClick={handleSaveConfig}
-                  disabled={saving}
-                  className="flex items-center space-x-2 bg-orange-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-orange-700 transition-all disabled:opacity-50"
-                >
-                  {saving ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : <><Save className="h-5 w-5" /><span>Guardar Cambios</span></>}
-                </button>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={handleTestConnection}
+                    disabled={saving}
+                    className="flex items-center space-x-2 bg-slate-100 text-slate-600 px-6 py-3 rounded-2xl font-bold hover:bg-slate-200 transition-all disabled:opacity-50"
+                  >
+                    <Clock className="h-5 w-5" />
+                    <span>Probar Conexión</span>
+                  </button>
+                  <button
+                    onClick={handleSaveConfig}
+                    disabled={saving}
+                    className="flex items-center space-x-2 bg-orange-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-orange-700 transition-all disabled:opacity-50"
+                  >
+                    {saving ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"></div> : <><Save className="h-5 w-5" /><span>Guardar Cambios</span></>}
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
