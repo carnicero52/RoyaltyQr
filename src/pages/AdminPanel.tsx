@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy, deleteDoc, addDoc, where, onSnapshot, increment } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { Business, Customer, Purchase, Reminder, Staff } from "../types";
@@ -22,6 +23,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 
 export default function AdminPanel() {
+  const { businessId } = useParams<{ businessId: string }>();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"overview" | "config" | "customers" | "qr" | "stats" | "billing" | "marketing" | "rewards" | "staff">("overview");
   const [business, setBusiness] = useState<Business | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -100,60 +103,55 @@ export default function AdminPanel() {
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid || !businessId) return;
 
     // Real-time Business Config
-    const unsubBusiness = onSnapshot(doc(db, "businesses", uid), async (docSnap) => {
+    const unsubBusiness = onSnapshot(doc(db, "businesses", businessId), async (docSnap) => {
       if (docSnap.exists()) {
-        setBusiness({ id: docSnap.id, ...docSnap.data() } as Business);
-      } else {
-        // Create default business if it doesn't exist
-        const defaultBusiness: Business = {
-          id: uid,
-          name: "Mi Negocio",
-          rewardDescription: "Café Gratis",
-          couponsNeeded: 10,
-          cooldownHours: 2,
-          notificationsEnabled: false,
-          ownerEmail: auth.currentUser?.email || "",
-          themeColor: "#ea580c", // Default orange-600
-          darkModeEnabled: false,
-        };
-        try {
-          await setDoc(doc(db, "businesses", uid), defaultBusiness);
-          setBusiness(defaultBusiness);
-        } catch (err) {
-          handleFirestoreError(err, 'write', `businesses/${uid}`);
+        const data = docSnap.data();
+        // Verify ownership (Firestore rules will also block, but UI should handle)
+        if (data.ownerUid !== uid) {
+          console.error("No tienes permiso para acceder a este negocio");
+          navigate("/dashboard");
+          return;
         }
+        setBusiness({ id: docSnap.id, ...data } as Business);
+      } else {
+        console.error("Negocio no encontrado");
+        navigate("/dashboard");
       }
       setLoading(false);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${uid}`));
+    }, (err) => {
+      console.error("Error loading business:", err);
+      handleFirestoreError(err, 'get', `businesses/${businessId}`);
+      navigate("/dashboard");
+    });
 
     // Real-time Customers
-    const unsubCustomers = onSnapshot(collection(db, "businesses", uid, "customers"), (snap) => {
+    const unsubCustomers = onSnapshot(collection(db, "businesses", businessId, "customers"), (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Customer));
       setCustomers(list);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${uid}/customers`));
+    }, (err) => handleFirestoreError(err, 'get', `businesses/${businessId}/customers`));
 
     // Real-time Purchases
-    const qPurchases = query(collection(db, "businesses", uid, "purchases"), orderBy("timestamp", "desc"));
+    const qPurchases = query(collection(db, "businesses", businessId, "purchases"), orderBy("timestamp", "desc"));
     const unsubPurchases = onSnapshot(qPurchases, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Purchase));
       setPurchases(list);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${uid}/purchases`));
+    }, (err) => handleFirestoreError(err, 'get', `businesses/${businessId}/purchases`));
 
     // Real-time Reminders
-    const qReminders = query(collection(db, "businesses", uid, "reminders"), orderBy("scheduledAt", "desc"));
+    const qReminders = query(collection(db, "businesses", businessId, "reminders"), orderBy("scheduledAt", "desc"));
     const unsubReminders = onSnapshot(qReminders, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Reminder));
       setReminders(list);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${uid}/reminders`));
+    }, (err) => handleFirestoreError(err, 'get', `businesses/${businessId}/reminders`));
 
     // Real-time Staff
-    const unsubStaff = onSnapshot(collection(db, "businesses", uid, "staff"), (snap) => {
+    const unsubStaff = onSnapshot(collection(db, "businesses", businessId, "staff"), (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Staff));
       setStaff(list);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${uid}/staff`));
+    }, (err) => handleFirestoreError(err, 'get', `businesses/${businessId}/staff`));
 
     return () => {
       unsubBusiness();

@@ -10,6 +10,7 @@ export interface Business {
   couponsNeeded: number;
   cooldownHours: number;
   ownerEmail?: string;
+  ownerUid?: string;
   telegramChatId?: string;
   telegramToken?: string;
   notificationsEnabled: boolean;

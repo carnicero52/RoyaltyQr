@@ -15,6 +15,7 @@
         "couponsNeeded": { "type": "integer", "description": "Number of coupons required for a reward." },
         "cooldownHours": { "type": "integer", "description": "Minimum hours between purchases." },
         "ownerEmail": { "type": "string", "description": "Email of the business owner." },
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of the business owner." },
         "telegramChatId": { "type": "string", "description": "Telegram chat ID for notifications." },
         "telegramToken": { "type": "string", "description": "Telegram bot token." },
         "gmailUser": { "type": "string", "description": "Gmail address for sending notifications." },

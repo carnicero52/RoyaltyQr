@@ -1,47 +1,61 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
-import { auth } from "./firebase";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import PublicPanel from "./pages/PublicPanel";
 import AdminPanel from "./pages/AdminPanel";
-import Login from "./pages/Login";
+import LoginPage from "./pages/LoginPage";
+import Dashboard from "./pages/Dashboard";
 
-export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, loading } = useAuth();
+  
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
       </div>
     );
   }
+  
+  if (!user) {
+    return <Navigate to="/login" />;
+  }
+  
+  return <>{children}</>;
+};
 
+export default function App() {
   return (
-    <Router>
-      <Routes>
-        {/* Public Route */}
-        <Route path="/negocio/:businessId" element={<PublicPanel />} />
-        
-        {/* Admin Routes */}
-        <Route 
-          path="/admin" 
-          element={user ? <AdminPanel /> : <Navigate to="/login" />} 
-        />
-        <Route path="/login" element={!user ? <Login /> : <Navigate to="/admin" />} />
-        
-        {/* Default Redirect */}
-        <Route path="/" element={<Navigate to="/admin" />} />
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          {/* Public Route */}
+          <Route path="/negocio/:businessId" element={<PublicPanel />} />
+          
+          {/* Auth Routes */}
+          <Route path="/login" element={<LoginPage />} />
+          
+          {/* Protected Admin Routes */}
+          <Route 
+            path="/dashboard" 
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/admin/:businessId" 
+            element={
+              <ProtectedRoute>
+                <AdminPanel />
+              </ProtectedRoute>
+            } 
+          />
+          
+          {/* Default Redirect */}
+          <Route path="/" element={<Navigate to="/dashboard" />} />
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }

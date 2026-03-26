@@ -48,8 +48,8 @@ service cloud.firestore {
 
     function isBusinessOwner(businessId) {
       return isAuthenticated() && 
-        (businessId == request.auth.uid || 
-         (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerEmail == request.auth.token.email));
+        (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid || 
+         get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerEmail == request.auth.token.email);
     }
 
     function isAuthorized(businessId) {
@@ -73,7 +73,8 @@ service cloud.firestore {
              data.rewardDescription is string && data.rewardDescription.size() < 500 &&
              data.couponsNeeded is number && data.couponsNeeded > 0 &&
              data.cooldownHours is number && data.cooldownHours >= 0 &&
-             data.notificationsEnabled is bool;
+             data.notificationsEnabled is bool &&
+             data.ownerUid is string && data.ownerUid == request.auth.uid;
     }
 
     function isValidCustomer(data) {
@@ -113,11 +114,12 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidBusiness(request.resource.data);
       
       // Read: owner or admin
-      allow read: if isAuthorized(businessId);
+      allow get: if isAuthorized(businessId);
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
       
-      // Update: owner or admin. Protect ownerEmail.
+      // Update: owner or admin. Protect ownerUid.
       allow update: if isAuthorized(businessId) && isValidBusiness(request.resource.data) &&
-                      (isAdmin() || request.resource.data.ownerEmail == resource.data.ownerEmail);
+                      (isAdmin() || request.resource.data.ownerUid == resource.data.ownerUid);
       
       // Delete: owner or admin
       allow delete: if isAuthorized(businessId);
