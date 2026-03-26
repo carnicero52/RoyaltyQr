@@ -212,8 +212,8 @@ async function startServer() {
     const subject = customSubject || `Fideliza: ${type}`;
 
     // Email Notification
-    const emailTarget = toEmail || config.email;
-    if (emailTarget) {
+    const emailTarget = toEmail || (type === "System" ? config.email : null);
+    if (emailTarget && emailTarget.trim() !== "") {
       const gUser = config.gmailUser || process.env.GMAIL_USER;
       const gPass = config.gmailAppPass || process.env.GMAIL_PASS;
 
@@ -270,10 +270,12 @@ async function startServer() {
       const phone = toPhone || config.whatsappPhone;
       const apiKey = config.whatsappApiKey;
       
-      if (phone && apiKey) {
+      if (phone && phone.trim() !== "" && apiKey && apiKey.trim() !== "") {
         try {
-          console.log(`[Notification] Sending WhatsApp to ${phone}`);
-          const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
+          // CallMeBot expects phone number in international format without the '+' sign
+          const cleanPhone = phone.replace(/\+/g, '');
+          console.log(`[Notification] Sending WhatsApp to ${cleanPhone}`);
+          const url = `https://api.callmebot.com/whatsapp.php?phone=${cleanPhone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
           const response = await fetch(url);
           if (response.ok) {
             results.whatsapp = { success: true };
@@ -336,6 +338,18 @@ async function startServer() {
     }
   });
 
+  // Manual trigger for reminders
+  app.post("/api/process-reminders", async (req, res) => {
+    try {
+      console.log("[API] Manual reminder check triggered");
+      await checkReminders();
+      res.json({ success: true, message: "Reminder check completed" });
+    } catch (error: any) {
+      console.error("[API] Manual reminder check failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Simple Scheduler for Reminders
   const checkReminders = async () => {
     const firestore = await getDb();
@@ -345,7 +359,7 @@ async function startServer() {
     }
     const now = new Date().toISOString();
     try {
-      console.log(`[Scheduler] Checking pending reminders...`);
+      console.log(`[Scheduler] Checking pending reminders at ${now}...`);
       
       const businessesSnapshot = await firestore.collection("businesses").get();
       if (businessesSnapshot.empty) {
@@ -353,8 +367,7 @@ async function startServer() {
         return;
       }
       
-      console.log(`[Scheduler] Found ${businessesSnapshot.docs.length} businesses`);
-      
+      let processedCount = 0;
       for (const bizDoc of businessesSnapshot.docs) {
         const business = bizDoc.data();
         const remindersSnapshot = await bizDoc.ref.collection("reminders")
@@ -365,7 +378,13 @@ async function startServer() {
 
         for (const doc of remindersSnapshot.docs) {
           const reminder = doc.data();
-          if (reminder.scheduledAt > now) continue;
+          if (reminder.scheduledAt > now) {
+            console.log(`[Scheduler] Reminder ${doc.id} is for the future (${reminder.scheduledAt}), skipping.`);
+            continue;
+          }
+
+          processedCount++;
+          console.log(`[Scheduler] Processing reminder ${doc.id} (Scheduled: ${reminder.scheduledAt})`);
 
           const config = {
             email: business.ownerEmail,

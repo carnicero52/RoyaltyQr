@@ -8,7 +8,7 @@ import {
   Edit2, Trash2, Download, FileText, Mail, Send, Bell, Gift,
   CheckCircle2, AlertCircle, TrendingUp, UserPlus, History, X, PlusCircle,
   CreditCard, Megaphone, Calendar, MessageSquare, Clock, User, Check,
-  Palette, Moon, Sun
+  Palette, Moon, Sun, RefreshCw
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { 
@@ -412,6 +412,28 @@ export default function AdminPanel() {
     }
   };
 
+  const handleProcessReminders = async () => {
+    if (!business) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/process-reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await response.json();
+      if (data.success) {
+        setStatus({ type: "success", message: "Proceso de notificaciones completado." });
+      } else {
+        setStatus({ type: "error", message: `Error: ${data.error}` });
+      }
+    } catch (error: any) {
+      console.error("Error processing reminders:", error);
+      setStatus({ type: "error", message: "Error al conectar con el servidor." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleAddCustomer = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
@@ -547,9 +569,55 @@ export default function AdminPanel() {
       }
 
       setIsAddingPurchase(null);
-      alert("Sello y cobro registrado con éxito!");
+      
+      // Notificar al cliente si tiene email
+      if (customerData.email) {
+        try {
+          await fetch("/api/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "Confirmación de Compra",
+              message: `¡Hola ${customerData.name || 'cliente'}! Hemos registrado tu compra por ${business.currency || "$"}${amount.toLocaleString()}. Ahora tienes ${customerData.couponsCount + couponsToAdd} sellos.`,
+              subject: `Compra registrada en ${business.name}`,
+              config: {
+                gmailUser: business.gmailUser,
+                gmailAppPass: business.gmailAppPass,
+              },
+              toEmail: customerData.email,
+            }),
+          });
+        } catch (err) {
+          console.error("Error sending confirmation email:", err);
+        }
+      }
+
+      // Notificar al dueño por WhatsApp si está habilitado
+      if (business.whatsappEnabled && business.whatsappPhone && business.whatsappApiKey) {
+        try {
+          await fetch("/api/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "Nueva Venta",
+              message: `Nueva venta registrada: ${business.currency || "$"}${amount.toLocaleString()} de ${customerData.name || customerData.phone}`,
+              config: {
+                whatsapp: true,
+                whatsappPhone: business.whatsappPhone,
+                whatsappApiKey: business.whatsappApiKey,
+              },
+              toPhone: business.whatsappPhone,
+            }),
+          });
+        } catch (err) {
+          console.error("Error sending WhatsApp notification:", err);
+        }
+      }
+
+      setStatus({ message: "¡Sello y cobro registrado con éxito!", type: 'success' });
     } catch (err) {
       console.error("Error adding purchase:", err);
+      setStatus({ message: "Error al registrar la compra.", type: 'error' });
     }
   };
 
@@ -1180,6 +1248,44 @@ export default function AdminPanel() {
                       <p className="text-[10px] text-gray-400 mt-1">
                         * Necesitas generar una "Contraseña de aplicación" en tu cuenta de Google.
                       </p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!business.gmailUser || !business.gmailAppPass) {
+                            alert("Por favor ingresa tu Gmail y Contraseña de Aplicación");
+                            return;
+                          }
+                          setStatus({ message: "Enviando prueba...", type: 'warning' });
+                          try {
+                            const res = await fetch("/api/notify", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                type: "Prueba de Conexión",
+                                message: "¡Hola! Esta es una prueba de conexión de Gmail desde Fideliza.",
+                                subject: "Prueba de Fideliza",
+                                config: {
+                                  gmailUser: business.gmailUser,
+                                  gmailAppPass: business.gmailAppPass,
+                                },
+                                toEmail: business.gmailUser,
+                              }),
+                            });
+                            const data = await res.json();
+                            if (data.success && data.results?.email?.success) {
+                              setStatus({ message: "¡Prueba enviada con éxito! Revisa tu bandeja de entrada.", type: 'success' });
+                            } else {
+                              throw new Error(data.results?.email?.error || "Error desconocido");
+                            }
+                          } catch (err: any) {
+                            setStatus({ message: `Error: ${err.message}`, type: 'error' });
+                          }
+                        }}
+                        className="mt-2 w-full py-2 px-4 bg-blue-100 text-blue-700 rounded-xl font-bold hover:bg-blue-200 transition-all flex items-center justify-center space-x-2"
+                      >
+                        <Send className="h-4 w-4" />
+                        <span>Probar Conexión Email</span>
+                      </button>
                     </div>
                     <div>
                       <label className={cn("block text-sm font-medium mb-1 flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>
@@ -1235,8 +1341,18 @@ export default function AdminPanel() {
 
                     {business.whatsappEnabled && (
                       <div className="space-y-4 pt-2">
+                        <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-800 space-y-1">
+                          <p className="font-bold flex items-center"><MessageSquare className="h-3 w-3 mr-1" /> Cómo configurar WhatsApp:</p>
+                          <ol className="list-decimal list-inside space-y-1">
+                            <li>Añade a tus contactos el número: <span className="font-mono font-bold">+34 644 20 66 15</span></li>
+                            <li>Envía el mensaje: <span className="font-mono font-bold">I allow callmebot to send me messages</span></li>
+                            <li>Recibirás tu API Key. Cópiala aquí.</li>
+                            <li>El número debe incluir el código de país (ej: +34600000000).</li>
+                          </ol>
+                          <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" rel="noopener noreferrer" className="inline-block mt-2 text-blue-600 underline font-bold">Obtener API Key aquí</a>
+                        </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Número de WhatsApp</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Número de WhatsApp (con + y código de país)</label>
                           <input
                             type="text"
                             value={business.whatsappPhone || ""}
@@ -1255,6 +1371,44 @@ export default function AdminPanel() {
                             placeholder="Tu API Key"
                           />
                         </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!business.whatsappPhone || !business.whatsappApiKey) {
+                              alert("Por favor ingresa el número y la API Key");
+                              return;
+                            }
+                            setStatus({ message: "Enviando prueba...", type: 'warning' });
+                            try {
+                              const res = await fetch("/api/notify", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  type: "Prueba de Conexión",
+                                  message: "¡Hola! Esta es una prueba de conexión de CallMeBot desde Fideliza.",
+                                  config: {
+                                    whatsapp: true,
+                                    whatsappPhone: business.whatsappPhone,
+                                    whatsappApiKey: business.whatsappApiKey,
+                                  },
+                                  toPhone: business.whatsappPhone,
+                                }),
+                              });
+                              const data = await res.json();
+                              if (data.success && data.results?.whatsapp?.success) {
+                                setStatus({ message: "¡Prueba enviada con éxito! Revisa tu WhatsApp.", type: 'success' });
+                              } else {
+                                throw new Error(data.results?.whatsapp?.error || "Error desconocido");
+                              }
+                            } catch (err: any) {
+                              setStatus({ message: `Error: ${err.message}`, type: 'error' });
+                            }
+                          }}
+                          className="w-full py-2 px-4 bg-green-100 text-green-700 rounded-xl font-bold hover:bg-green-200 transition-all flex items-center justify-center space-x-2"
+                        >
+                          <Send className="h-4 w-4" />
+                          <span>Probar Conexión WhatsApp</span>
+                        </button>
                       </div>
                     )}
                   </div>
@@ -2190,6 +2344,23 @@ export default function AdminPanel() {
                         <History className="h-5 w-5 text-orange-600" />
                         <span>Historial de Notificaciones</span>
                       </h2>
+                      <button
+                        onClick={handleProcessReminders}
+                        disabled={saving}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-sm font-bold flex items-center space-x-2 transition-all",
+                          business?.darkModeEnabled ? "bg-slate-800 text-white hover:bg-slate-700" : "bg-gray-100 text-gray-900 hover:bg-gray-200"
+                        )}
+                      >
+                        {saving ? (
+                          <div className="animate-spin h-4 w-4 border-b-2 border-orange-600 rounded-full"></div>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-4 w-4 text-orange-600" />
+                            <span>Procesar Pendientes</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full">
@@ -2431,7 +2602,7 @@ export default function AdminPanel() {
                   </div>
                   {isAddingCustomer && (
                     <div>
-                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Referido por (Teléfono)</label>
+                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Referido por (Teléfono - Opcional)</label>
                       <input
                         type="tel"
                         name="referredBy"
