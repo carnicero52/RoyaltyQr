@@ -40,6 +40,11 @@ app.get("/api/health", async (req, res) => {
   try {
     const firestore = await getDb();
     dbStatus = firestore ? "connected" : "failed";
+    
+    // Trigger scheduler on health check to ensure it runs in serverless environments
+    if (firestore) {
+      checkReminders().catch(e => console.error("[HealthCheck] Scheduler trigger failed:", e));
+    }
   } catch (e: any) {
     dbStatus = "error";
     dbError = e.message;
@@ -351,10 +356,15 @@ async function startServer() {
   });
 
   // Simple Scheduler for Reminders
+  let isChecking = false;
   const checkReminders = async () => {
+    if (isChecking) return;
+    isChecking = true;
+    
     const firestore = await getDb();
     if (!firestore) {
       console.warn("[Scheduler] Firestore not initialized yet, skipping check");
+      isChecking = false;
       return;
     }
     const now = new Date().toISOString();
@@ -378,6 +388,13 @@ async function startServer() {
 
         for (const doc of remindersSnapshot.docs) {
           const reminder = doc.data();
+          
+          // Ensure we have a valid scheduledAt
+          if (!reminder.scheduledAt) {
+            console.warn(`[Scheduler] Reminder ${doc.id} has no scheduledAt, skipping.`);
+            continue;
+          }
+
           if (reminder.scheduledAt > now) {
             console.log(`[Scheduler] Reminder ${doc.id} is for the future (${reminder.scheduledAt}). Business TZ: ${business.timezone || 'America/Caracas'}. Current UTC: ${now}`);
             continue;
@@ -467,13 +484,18 @@ async function startServer() {
         }
       }
     }
-  } catch (error: any) {
-      console.error("[Scheduler] Error in interval:", error);
-      if (error.message?.includes("PERMISSION_DENIED")) {
-        console.error("[Scheduler] CRITICAL: Permission Denied. Check if the Firebase project ID in firebase-applet-config.json matches the environment and if the service account has access.");
-      }
+    if (processedCount > 0) {
+      console.log(`[Scheduler] Finished processing ${processedCount} reminders.`);
     }
-  };
+  } catch (error: any) {
+    console.error("[Scheduler] Error in interval:", error);
+    if (error.message?.includes("PERMISSION_DENIED")) {
+      console.error("[Scheduler] CRITICAL: Permission Denied. Check if the Firebase project ID in firebase-applet-config.json matches the environment and if the service account has access.");
+    }
+  } finally {
+    isChecking = false;
+  }
+};
 
   // Run once on startup and then every minute
   checkReminders();
