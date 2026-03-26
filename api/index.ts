@@ -11,18 +11,23 @@ import { getFirestore } from "firebase-admin/firestore";
 
 dotenv.config();
 
+// Load config safely
+let firebaseConfig: any = {};
+try {
+  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    console.log("[Config] Loaded firebase-applet-config.json successfully");
+  } else {
+    console.warn("[Config] firebase-applet-config.json NOT found at", configPath);
+  }
+} catch (err) {
+  console.error("[Config] Error loading firebase-applet-config.json:", err);
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Load config
-const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-let firebaseConfig: any = {};
-try {
-  firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-} catch (e) {
-  console.error("[Config] Error loading firebase-applet-config.json:", e);
-}
 
 // Health check at the VERY top
 app.get("/api/health", (req, res) => {
@@ -30,7 +35,10 @@ app.get("/api/health", (req, res) => {
     status: "ok", 
     timestamp: new Date().toISOString(),
     projectId: firebaseConfig?.projectId || "unknown",
-    databaseId: firebaseConfig?.firestoreDatabaseId || "none"
+    databaseId: firebaseConfig?.firestoreDatabaseId || "none",
+    isVercel: !!process.env.VERCEL,
+    nodeVersion: process.version,
+    env: process.env.NODE_ENV
   });
 });
 
@@ -38,10 +46,12 @@ app.get("/api/health", (req, res) => {
 let serverApp: admin.app.App | null = null;
 let db: admin.firestore.Firestore | null = null;
 
-if (firebaseConfig.projectId) {
+if (firebaseConfig && firebaseConfig.projectId) {
   try {
     if (admin.apps.length === 0) {
-      serverApp = admin.initializeApp({ projectId: firebaseConfig.projectId });
+      serverApp = admin.initializeApp({ 
+        projectId: firebaseConfig.projectId 
+      });
     } else {
       serverApp = admin.app();
     }
@@ -358,13 +368,13 @@ async function startServer() {
   setInterval(checkReminders, 60000);
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
@@ -372,9 +382,14 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-  });
+  // Only listen if NOT on Vercel
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+    });
+  } else {
+    console.log("[Server] Running in Vercel environment, skipping app.listen");
+  }
 }
 
 startServer();
