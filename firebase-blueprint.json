@@ -54,6 +54,34 @@
         "timestamp": { "type": "string", "format": "date-time", "description": "When the purchase occurred." }
       },
       "required": ["customerId", "businessId", "timestamp"]
+    },
+    "staff": {
+      "title": "Staff",
+      "description": "A staff member of a business.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "Email of the staff member." },
+        "name": { "type": "string", "description": "Name of the staff member." },
+        "role": { "type": "string", "enum": ["staff", "admin"], "description": "Role of the staff member." },
+        "businessId": { "type": "string", "description": "ID of the business the staff member belongs to." }
+      },
+      "required": ["email", "name", "role", "businessId"]
+    },
+    "reminder": {
+      "title": "Reminder",
+      "description": "A scheduled notification for customers.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string", "description": "ID of the business." },
+        "subject": { "type": "string", "description": "Subject of the notification." },
+        "message": { "type": "string", "description": "Message of the notification." },
+        "scheduledAt": { "type": "string", "format": "date-time", "description": "When the notification is scheduled to be sent." },
+        "customerIds": { "type": "array", "items": { "type": "string" }, "description": "IDs of the customers to notify." },
+        "status": { "type": "string", "enum": ["pending", "sent", "failed"], "description": "Current status of the reminder." },
+        "statusMessage": { "type": "string", "description": "Optional error or status message." },
+        "type": { "type": "string", "enum": ["marketing", "billing"], "description": "Type of reminder." }
+      },
+      "required": ["businessId", "subject", "message", "scheduledAt", "status", "type"]
     }
   },
   "firestore": {
@@ -68,6 +96,14 @@
     "/businesses/{businessId}/purchases/{purchaseId}": {
       "schema": "purchase",
       "description": "Purchase history for a specific business."
+    },
+    "/businesses/{businessId}/staff/{staffId}": {
+      "schema": "staff",
+      "description": "Staff members for a specific business."
+    },
+    "/businesses/{businessId}/reminders/{reminderId}": {
+      "schema": "reminder",
+      "description": "Scheduled reminders for a specific business."
     }
   }
 }

@@ -1,51 +1,151 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
+
+    // ===============================================================
+    // Assumed Data Model (aligned with types.ts)
+    // ===============================================================
+    //
+    // Collection: businesses
+    // Fields: name, slogan, description, rewardLongDescription, logoUrl, rewardDescription, 
+    //         rewardImageUrl, couponsNeeded, cooldownHours, ownerEmail, telegramChatId, 
+    //         telegramToken, notificationsEnabled, billingNotificationsEnabled, 
+    //         marketingNotificationsEnabled, whatsappEnabled, whatsappPhone, whatsappApiKey, 
+    //         gmailUser, gmailAppPass, currency, themeColor, darkModeEnabled, levels
+    //
+    // Collection: businesses/{businessId}/customers
+    // Fields: phone, name, email, notes, status, couponsCount, totalSpent, lastPurchaseAt, 
+    //         businessId, level, referredBy, referralCount
+    //
+    // Collection: businesses/{businessId}/purchases
+    // Fields: customerId, businessId, amount, paymentMethod, notes, timestamp, staffId
+    //
+    // Collection: businesses/{businessId}/staff
+    // Fields: email, name, role, businessId
+    //
+    // Collection: businesses/{businessId}/reminders
+    // Fields: businessId, customerId, customerIds, type, subject, message, scheduledAt, 
+    //         status, statusMessage
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "marcorodolfo40@gmail.com" && request.auth.token.email_verified == true));
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
     }
 
-    // Business configuration: Publicly readable for the customer panel, but only writable by admins.
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == "marcorodolfo40@gmail.com" && isEmailVerified());
+    }
+
+    function isBusinessOwner(businessId) {
+      return isAuthenticated() && 
+        (businessId == request.auth.uid || 
+         (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerEmail == request.auth.token.email));
+    }
+
+    function isAuthorized(businessId) {
+      return isAdmin() || isBusinessOwner(businessId);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Domain Validators (for write operations)
+    // ===============================================================
+
+    function isValidBusiness(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.rewardDescription is string && data.rewardDescription.size() < 500 &&
+             data.couponsNeeded is number && data.couponsNeeded > 0 &&
+             data.cooldownHours is number && data.cooldownHours >= 0 &&
+             data.notificationsEnabled is bool;
+    }
+
+    function isValidCustomer(data) {
+      return data.phone is string && data.phone.size() > 0 && data.phone.size() < 20 &&
+             data.couponsCount is number && data.couponsCount >= 0 &&
+             data.businessId is string;
+    }
+
+    function isValidPurchase(data) {
+      return data.customerId is string &&
+             data.businessId is string &&
+             isValidDateString(data.timestamp);
+    }
+
+    function isValidStaff(data) {
+      return data.email is string && isValidEmail(data.email) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role in ['staff', 'admin'] &&
+             data.businessId is string;
+    }
+
+    function isValidReminder(data) {
+      return data.businessId is string &&
+             data.type in ['billing', 'marketing'] &&
+             data.subject is string && data.subject.size() > 0 && data.subject.size() < 200 &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 2000 &&
+             isValidDateString(data.scheduledAt) &&
+             data.status in ['pending', 'sent', 'failed'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
     match /businesses/{businessId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      // Create: user must be authenticated
+      allow create: if isAuthenticated() && isValidBusiness(request.resource.data);
+      
+      // Read: owner or admin
+      allow read: if isAuthorized(businessId);
+      
+      // Update: owner or admin. Protect ownerEmail.
+      allow update: if isAuthorized(businessId) && isValidBusiness(request.resource.data) &&
+                      (isAdmin() || request.resource.data.ownerEmail == resource.data.ownerEmail);
+      
+      // Delete: owner or admin
+      allow delete: if isAuthorized(businessId);
 
-      // Customers: Admins can do everything. Customers can read/write their own data based on phone number.
-      // Note: Since we use phone number as ID, we need to be careful.
-      // For simplicity in this loyalty app, we'll allow public creation/update of customer records
-      // but only if the phone number matches the document ID.
       match /customers/{customerId} {
-        allow read: if true; // Customers need to see their progress
-        allow write: if true; // Customers register themselves via phone
+        allow read: if isAuthorized(businessId);
+        allow write: if isAuthorized(businessId) && (request.method == 'delete' || isValidCustomer(request.resource.data));
       }
 
-      // Purchases: Admins can read/write. Customers can only create (register) a purchase.
       match /purchases/{purchaseId} {
-        allow read: if isAdmin();
-        allow create: if true; // Customers register purchases
-        allow update, delete: if isAdmin();
-      }
-
-      match /reminders/{reminderId} {
-        allow read, write: if isAdmin();
+        allow read: if isAuthorized(businessId);
+        allow write: if isAuthorized(businessId) && (request.method == 'delete' || isValidPurchase(request.resource.data));
       }
 
       match /staff/{staffId} {
-        allow read, write: if isAdmin();
+        allow read: if isAuthorized(businessId);
+        allow write: if isAuthorized(businessId) && (request.method == 'delete' || isValidStaff(request.resource.data));
+      }
+
+      match /reminders/{reminderId} {
+        allow read: if isAuthorized(businessId);
+        allow write: if isAuthorized(businessId) && (request.method == 'delete' || isValidReminder(request.resource.data));
       }
     }
 
-    // User roles for admin access
-    match /users/{userId} {
-      allow read: if isAuthenticated() && request.auth.uid == userId;
-      allow write: if isAdmin();
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -28,23 +28,39 @@ app.get("/api/health", (req, res) => {
 
 // Lazy Firebase Init Helper
 let db: admin.firestore.Firestore | null = null;
-const getDb = () => {
+const getDb = async () => {
   if (db) return db;
-  if (!firebaseConfig.projectId) return null;
   
   try {
     let serverApp;
     if (admin.apps.length === 0) {
-      serverApp = admin.initializeApp({ projectId: firebaseConfig.projectId });
+      // In Cloud Run/Vercel, initializeApp() without arguments uses default credentials
+      // which is usually the most reliable way to get permissions.
+      serverApp = admin.initializeApp();
+      console.log("[Firebase] Initialized with default credentials");
     } else {
       serverApp = admin.app();
     }
+    
     const dbId = firebaseConfig.firestoreDatabaseId;
+    // If we have a specific database ID, use it. 
+    // Note: getFirestore(serverApp, dbId) is the correct way to access named databases.
     db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
     return db;
   } catch (err) {
-    console.error("[Firebase] Lazy Init Error:", err);
-    return null;
+    console.error("[Firebase] Default Init Error, trying with projectId:", err);
+    try {
+      if (admin.apps.length > 0) {
+        await admin.app().delete();
+      }
+      const serverApp = admin.initializeApp({ projectId: firebaseConfig.projectId });
+      const dbId = firebaseConfig.firestoreDatabaseId;
+      db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
+      return db;
+    } catch (innerErr) {
+      console.error("[Firebase] Fallback Init Error:", innerErr);
+      return null;
+    }
   }
 };
 
@@ -182,7 +198,7 @@ async function startServer() {
   app.get("/api/test-db", async (req, res) => {
     const path = "businesses";
     try {
-      const firestore = getDb();
+      const firestore = await getDb();
       if (!firestore) throw new Error("Firestore not initialized");
       const snapshot = await firestore.collection(path).limit(1).get();
       res.json({ 
@@ -207,33 +223,61 @@ async function startServer() {
 
   // Simple Scheduler for Reminders
   const checkReminders = async () => {
-    const firestore = getDb();
-    if (!firestore) return;
+    const firestore = await getDb();
+    if (!firestore) {
+      console.warn("[Scheduler] Firestore not initialized yet, skipping check");
+      return;
+    }
     const now = new Date().toISOString();
     try {
-      const remindersSnapshot = await firestore.collectionGroup("reminders")
-        .where("status", "==", "pending")
-        .get();
+      console.log(`[Scheduler] Checking pending reminders for project: ${firebaseConfig.projectId}, database: ${firebaseConfig.firestoreDatabaseId || '(default)'}...`);
+      
+      // Instead of collectionGroup (which requires manual indexing), 
+      // we iterate through businesses to be more robust.
+      // We use a try-catch specifically for this call to diagnose permission issues.
+      let businessesSnapshot;
+      try {
+        businessesSnapshot = await firestore.collection("businesses").get();
+        console.log(`[Scheduler] Found ${businessesSnapshot.docs.length} businesses`);
+      } catch (err: any) {
+        if (err.message?.includes("PERMISSION_DENIED")) {
+          console.error("[Scheduler] PERMISSION_DENIED on 'businesses' collection. This usually means the service account lacks 'Cloud Datastore User' or 'Firebase Admin' roles for the project/database.");
+          // Try to fallback to default database if it was using a named one
+          if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
+            console.log("[Scheduler] Attempting fallback to default database...");
+            const defaultDb = getFirestore(admin.app());
+            businessesSnapshot = await defaultDb.collection("businesses").get();
+            // If fallback works, update the global db
+            db = defaultDb;
+          } else {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
+      }
+      
+      for (const bizDoc of businessesSnapshot.docs) {
+        const business = bizDoc.data();
+        const remindersSnapshot = await bizDoc.ref.collection("reminders")
+          .where("status", "==", "pending")
+          .get();
 
-      for (const doc of remindersSnapshot.docs) {
-        const reminder = doc.data();
-        if (reminder.scheduledAt > now) continue;
+        for (const doc of remindersSnapshot.docs) {
+          const reminder = doc.data();
+          if (reminder.scheduledAt > now) continue;
 
-        const businessDoc = await firestore.collection("businesses").doc(reminder.businessId).get();
-        const business = businessDoc.data();
-        if (!business) continue;
-
-        const config = {
-          email: business.ownerEmail,
-          telegram: !!business.telegramChatId,
-          telegramToken: business.telegramToken,
-          telegramChatId: business.telegramChatId,
-          whatsapp: !!business.whatsappEnabled,
-          whatsappPhone: business.whatsappPhone,
-          whatsappApiKey: business.whatsappApiKey,
-          gmailUser: business.gmailUser,
-          gmailAppPass: business.gmailAppPass,
-        };
+          const config = {
+            email: business.ownerEmail,
+            telegram: !!business.telegramChatId,
+            telegramToken: business.telegramToken,
+            telegramChatId: business.telegramChatId,
+            whatsapp: !!business.whatsappEnabled,
+            whatsappPhone: business.whatsappPhone,
+            whatsappApiKey: business.whatsappApiKey,
+            gmailUser: business.gmailUser,
+            gmailAppPass: business.gmailAppPass,
+          };
 
         try {
           let anySuccess = false;
@@ -243,7 +287,7 @@ async function startServer() {
           if (reminder.customerIds && reminder.customerIds.length > 0) {
             console.log(`[Scheduler] Sending reminder ${doc.id} to ${reminder.customerIds.length} customers`);
             for (const customerId of reminder.customerIds) {
-              const customerDoc = await firestore.collection("businesses").doc(reminder.businessId).collection("customers").doc(customerId).get();
+              const customerDoc = await bizDoc.ref.collection("customers").doc(customerId).get();
               const customer = customerDoc.data();
               if (customer) {
                 const results = await sendNotification({
@@ -303,8 +347,12 @@ async function startServer() {
           });
         }
       }
-    } catch (error) {
+    }
+  } catch (error: any) {
       console.error("[Scheduler] Error in interval:", error);
+      if (error.message?.includes("PERMISSION_DENIED")) {
+        console.error("[Scheduler] CRITICAL: Permission Denied. Check if the Firebase project ID in firebase-applet-config.json matches the environment and if the service account has access.");
+      }
     }
   };
 
