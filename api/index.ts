@@ -1,28 +1,58 @@
 import dotenv from "dotenv";
 import express from "express";
 import path from "path";
+import fs from "fs";
 import cors from "cors";
 import nodemailer from "nodemailer";
 import TelegramBot from "node-telegram-bot-api";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
-// Import config directly - this is the most reliable way for Vercel to bundle it
-import firebaseConfig from "../firebase-applet-config.json" with { type: "json" };
-
 dotenv.config();
+
+// Robust config loading
+let firebaseConfig: any = {};
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    console.log("[Firebase] Config loaded from file");
+  } else {
+    // Try one level up if we're in a subdirectory
+    const parentConfigPath = path.join(process.cwd(), "..", "firebase-applet-config.json");
+    if (fs.existsSync(parentConfigPath)) {
+      firebaseConfig = JSON.parse(fs.readFileSync(parentConfigPath, "utf8"));
+      console.log("[Firebase] Config loaded from parent directory");
+    }
+  }
+} catch (e) {
+  console.warn("[Firebase] Could not load firebase-applet-config.json:", e);
+}
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // Health check - Minimal and fast
-app.get("/api/health", (req, res) => {
+app.get("/api/health", async (req, res) => {
+  let dbStatus = "not_initialized";
+  let dbError = null;
+  try {
+    const firestore = await getDb();
+    dbStatus = firestore ? "connected" : "failed";
+  } catch (e: any) {
+    dbStatus = "error";
+    dbError = e.message;
+  }
+
   res.json({ 
     status: "ok", 
     timestamp: new Date().toISOString(),
     projectId: firebaseConfig?.projectId || "unknown",
-    isVercel: !!process.env.VERCEL
+    dbStatus,
+    dbError,
+    isVercel: !!process.env.VERCEL,
+    envProjectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "none"
   });
 });
 
@@ -32,32 +62,54 @@ const getDb = async () => {
   if (db) return db;
   
   try {
+    console.log("[Firebase] Starting initialization...");
+    console.log("[Firebase] Config loaded:", !!firebaseConfig);
+    console.log("[Firebase] Config ProjectId:", firebaseConfig?.projectId);
+    console.log("[Firebase] Env ProjectId:", process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT);
+    
     let serverApp;
     if (admin.apps.length === 0) {
-      try {
-        // Try default initialization first - most reliable in Cloud Run
-        serverApp = admin.initializeApp();
-        console.log("[Firebase] Initialized with default environment credentials");
-      } catch (e) {
-        if (firebaseConfig.projectId) {
-          serverApp = admin.initializeApp({ projectId: firebaseConfig.projectId });
-          console.log("[Firebase] Initialized with projectId from config:", firebaseConfig.projectId);
-        } else {
+      // Priority 1: Explicit projectId from config
+      const configProjectId = firebaseConfig?.projectId;
+      // Priority 2: Environment variables
+      const envProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+      
+      const finalProjectId = (configProjectId && configProjectId !== "TODO_PROJECT_ID") ? configProjectId : envProjectId;
+      
+      if (finalProjectId) {
+        try {
+          serverApp = admin.initializeApp({ 
+            projectId: finalProjectId,
+            storageBucket: firebaseConfig?.storageBucket
+          });
+          console.log("[Firebase] Initialized with explicit projectId:", finalProjectId);
+        } catch (e: any) {
+          console.warn("[Firebase] Explicit init failed, trying default:", e.message);
+          serverApp = admin.initializeApp();
+        }
+      } else {
+        console.log("[Firebase] No valid projectId found, trying default initialization...");
+        try {
+          serverApp = admin.initializeApp();
+          console.log("[Firebase] Initialized with default credentials");
+        } catch (e: any) {
+          console.error("[Firebase] Default initialization failed:", e.message);
           throw e;
         }
       }
     } else {
       serverApp = admin.app();
+      console.log("[Firebase] Using existing app");
     }
     
-    const dbId = firebaseConfig.firestoreDatabaseId;
+    const dbId = firebaseConfig?.firestoreDatabaseId;
     const useNamedDb = dbId && dbId !== "(default)";
     
     if (useNamedDb) {
       try {
-        console.log(`[Firebase] Attempting to connect to named database: ${dbId}`);
+        console.log(`[Firebase] Connecting to named database: ${dbId}`);
         db = getFirestore(serverApp, dbId);
-        // Test the named database
+        // Test connection
         await db.collection("businesses").limit(1).get();
         console.log(`[Firebase] Connected to named database: ${dbId}`);
       } catch (err: any) {
@@ -70,6 +122,7 @@ const getDb = async () => {
         }
       }
     } else {
+      console.log("[Firebase] Using (default) database");
       db = getFirestore(serverApp);
     }
     
@@ -79,15 +132,19 @@ const getDb = async () => {
     
     return db;
   } catch (err: any) {
-    console.error("[Firebase] Critical Init Error:", err);
+    console.error("[Firebase] Critical Init Error:", err.message);
     // Last ditch effort: default everything
     try {
-      if (admin.apps.length === 0) admin.initializeApp();
+      if (admin.apps.length === 0) {
+        admin.initializeApp();
+      }
       db = getFirestore(admin.app());
+      await db.collection("businesses").limit(1).get();
       return db;
-    } catch (lastErr) {
-      console.error("[Firebase] Last ditch effort failed:", lastErr);
-      return null;
+    } catch (lastErr: any) {
+      console.error("[Firebase] Last ditch effort failed:", lastErr.message);
+      // If we still fail, throw a more descriptive error
+      throw new Error(`Firebase Initialization Failed: ${err.message}. (Last ditch error: ${lastErr.message}). ProjectId in config: ${firebaseConfig?.projectId || 'none'}`);
     }
   }
 };
