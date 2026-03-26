@@ -22,7 +22,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<"config" | "customers" | "qr" | "stats" | "billing" | "marketing" | "rewards" | "staff">("config");
+  const [activeTab, setActiveTab] = useState<"overview" | "config" | "customers" | "qr" | "stats" | "billing" | "marketing" | "rewards" | "staff">("overview");
   const [business, setBusiness] = useState<Business | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -646,6 +646,16 @@ export default function AdminPanel() {
 
         <nav className="flex-1 px-4 space-y-2 mt-4">
           <button
+            onClick={() => setActiveTab("overview")}
+            className={cn(
+              "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
+              activeTab === "overview" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
+            )}
+          >
+            <TrendingUp className="h-5 w-5" />
+            <span className="font-medium">Resumen</span>
+          </button>
+          <button
             onClick={() => setActiveTab("config")}
             className={cn(
               "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
@@ -760,6 +770,7 @@ export default function AdminPanel() {
             <span className="text-lg font-bold">Fideliza</span>
           </div>
           <div className="flex space-x-2">
+             <button onClick={() => setActiveTab("overview")} className={cn("p-2 rounded-lg", activeTab === "overview" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><TrendingUp className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("config")} className={cn("p-2 rounded-lg", activeTab === "config" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Settings className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("customers")} className={cn("p-2 rounded-lg", activeTab === "customers" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Users className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("qr")} className={cn("p-2 rounded-lg", activeTab === "qr" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><QrCode className="h-5 w-5" /></button>
@@ -772,6 +783,175 @@ export default function AdminPanel() {
         </header>
 
         <div className="p-6 md:p-10 max-w-6xl mx-auto">
+          {/* Overview / Dashboard Tab */}
+          {activeTab === "overview" && business && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>¡Hola, {business.name}!</h1>
+                  <p className={cn("mt-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Aquí tienes un resumen de lo que está pasando hoy.</p>
+                </div>
+                <div className="hidden md:block">
+                  <p className={cn("text-sm font-medium", business?.darkModeEnabled ? "text-slate-500" : "text-gray-400")}>
+                    {format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className={cn(
+                  "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-blue-50 rounded-2xl text-blue-600"><Users className="h-6 w-6" /></div>
+                  </div>
+                  <p className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{stats.totalCustomers}</p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Clientes Totales</p>
+                </div>
+                <div className={cn(
+                  "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-orange-50 rounded-2xl text-orange-600"><TrendingUp className="h-6 w-6" /></div>
+                  </div>
+                  <p className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{stats.totalPurchases}</p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Ventas Registradas</p>
+                </div>
+                <div className={cn(
+                  "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-green-50 rounded-2xl text-green-600"><Gift className="h-6 w-6" /></div>
+                  </div>
+                  <p className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{stats.rewardsReached}</p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Premios por Entregar</p>
+                </div>
+                <div className={cn(
+                  "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-purple-50 rounded-2xl text-purple-600"><CreditCard className="h-6 w-6" /></div>
+                  </div>
+                  <p className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                    {business.currency || "$"} {purchases.reduce((sum, p) => sum + (p.amount || 0), 0).toLocaleString()}
+                  </p>
+                  <p className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Recaudación Total</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Recent Activity */}
+                <div className={cn(
+                  "lg:col-span-2 p-8 rounded-3xl border shadow-sm transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className={cn("text-xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Actividad Reciente</h2>
+                    <button onClick={() => setActiveTab("billing")} className="text-sm text-orange-600 font-bold hover:underline">Ver todo</button>
+                  </div>
+                  <div className="space-y-4">
+                    {purchases.slice(0, 5).map((purchase) => {
+                      const customer = customers.find(c => c.id === purchase.customerId);
+                      return (
+                        <div key={purchase.id} className={cn(
+                          "flex items-center justify-between p-4 rounded-2xl border transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800/50 border-slate-800" : "bg-gray-50 border-gray-100"
+                        )}>
+                          <div className="flex items-center space-x-4">
+                            <div className="h-10 w-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold">
+                              {(customer?.name || customer?.phone || "?")[0].toUpperCase()}
+                            </div>
+                            <div>
+                              <p className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                                {customer?.name || customer?.phone}
+                              </p>
+                              <p className="text-xs text-gray-500">{format(new Date(purchase.timestamp), "d 'de' MMM, HH:mm", { locale: es })}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold text-orange-600">+{business.currency || "$"} {purchase.amount?.toLocaleString()}</p>
+                            <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">{purchase.paymentMethod}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {purchases.length === 0 && (
+                      <div className="text-center py-10 text-gray-400">
+                        <History className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                        <p>No hay actividad registrada aún.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Quick Actions & Reminders */}
+                <div className="space-y-8">
+                  <div className={cn(
+                    "p-8 rounded-3xl border shadow-sm transition-colors duration-300",
+                    business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                  )}>
+                    <h2 className={cn("text-xl font-bold mb-6", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Acciones Rápidas</h2>
+                    <div className="grid grid-cols-1 gap-3">
+                      <button 
+                        onClick={() => setActiveTab("qr")}
+                        className="flex items-center space-x-3 p-4 rounded-2xl bg-orange-600 text-white font-bold hover:bg-orange-700 transition-all"
+                      >
+                        <QrCode className="h-5 w-5" />
+                        <span>Escanear / Ver QR</span>
+                      </button>
+                      <button 
+                        onClick={() => setActiveTab("customers")}
+                        className={cn(
+                          "flex items-center space-x-3 p-4 rounded-2xl border font-bold transition-all",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white hover:bg-slate-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                        )}
+                      >
+                        <UserPlus className="h-5 w-5" />
+                        <span>Nuevo Cliente</span>
+                      </button>
+                      <button 
+                        onClick={() => setActiveTab("marketing")}
+                        className={cn(
+                          "flex items-center space-x-3 p-4 rounded-2xl border font-bold transition-all",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white hover:bg-slate-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                        )}
+                      >
+                        <Megaphone className="h-5 w-5" />
+                        <span>Crear Campaña</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={cn(
+                    "p-8 rounded-3xl border shadow-sm transition-colors duration-300",
+                    business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                  )}>
+                    <h2 className={cn("text-xl font-bold mb-6", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Próximos Envíos</h2>
+                    <div className="space-y-4">
+                      {reminders.filter(r => r.status === 'pending').slice(0, 3).map(reminder => (
+                        <div key={reminder.id} className="flex items-start space-x-3">
+                          <div className="mt-1 h-2 w-2 rounded-full bg-orange-500 animate-pulse"></div>
+                          <div>
+                            <p className={cn("text-sm font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{reminder.subject}</p>
+                            <p className="text-xs text-gray-500">{format(new Date(reminder.scheduledAt), "d 'de' MMM, HH:mm", { locale: es })}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {reminders.filter(r => r.status === 'pending').length === 0 && (
+                        <p className="text-sm text-gray-400 text-center py-4 italic">No hay envíos programados.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Configuration Tab */}
           {activeTab === "config" && business && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
