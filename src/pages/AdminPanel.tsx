@@ -19,6 +19,7 @@ import { jsPDF } from "jspdf";
 import "jspdf-autotable";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { formatInTimeZone, toDate } from 'date-fns-tz';
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 
@@ -62,6 +63,12 @@ export default function AdminPanel() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const formatDate = (date: Date | string | number, formatStr: string, options?: any) => {
+    const tz = business?.timezone || "America/Caracas";
+    return formatInTimeZone(new Date(date), tz, formatStr, options);
+  };
+
   const [status, setStatus] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isEditingCustomer, setIsEditingCustomer] = useState<Customer | null>(null);
@@ -74,11 +81,12 @@ export default function AdminPanel() {
   const [reminderForm, setReminderForm] = useState({
     subject: "",
     message: "",
-    scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    scheduledAt: formatDate(new Date(), "yyyy-MM-dd'T'HH:mm"),
     type: "marketing" as "billing" | "marketing"
   });
 
   const qrRef = useRef<HTMLDivElement>(null);
+  const hasInitializedForm = useRef(false);
 
   const exportToCSV = (data: any[], fileName: string) => {
     if (!data.length) return;
@@ -111,7 +119,7 @@ export default function AdminPanel() {
     
     doc.line(20, 35, 190, 35);
     
-    doc.text(`Fecha: ${format(new Date(purchase.timestamp), "dd/MM/yyyy HH:mm")}`, 20, 45);
+    doc.text(`Fecha: ${formatDate(new Date(purchase.timestamp), "dd/MM/yyyy HH:mm")}`, 20, 45);
     doc.text(`Cliente: ${customer.name || customer.phone}`, 20, 55);
     doc.text(`Teléfono: ${customer.phone}`, 20, 65);
     
@@ -138,14 +146,23 @@ export default function AdminPanel() {
     // Real-time Business Config
     const unsubBusiness = onSnapshot(doc(db, "businesses", businessId), async (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data();
+        const data = { id: docSnap.id, ...docSnap.data() } as Business;
         // Verify ownership (Firestore rules will also block, but UI should handle)
         if (data.ownerUid !== uid) {
           console.error("No tienes permiso para acceder a este negocio");
           navigate("/dashboard");
           return;
         }
-        setBusiness({ id: docSnap.id, ...data } as Business);
+        setBusiness(data);
+        
+        // Update initial scheduledAt if it hasn't been touched
+        if (!hasInitializedForm.current) {
+          setReminderForm(prev => ({
+            ...prev,
+            scheduledAt: formatInTimeZone(new Date(), data.timezone || "America/Caracas", "yyyy-MM-dd'T'HH:mm")
+          }));
+          hasInitializedForm.current = true;
+        }
       } else {
         console.error("Negocio no encontrado");
         navigate("/dashboard");
@@ -241,7 +258,10 @@ export default function AdminPanel() {
     if (!business) return;
     setSaving(true);
     try {
-      const scheduledDate = new Date(reminderForm.scheduledAt);
+      // Convert local date to business timezone ISO string
+      const tz = business.timezone || "America/Caracas";
+      const scheduledDate = toDate(reminderForm.scheduledAt, { timeZone: tz });
+      
       const reminderData: Omit<Reminder, 'id'> = {
         businessId: business.id,
         ...reminderForm,
@@ -259,7 +279,7 @@ export default function AdminPanel() {
       setReminderForm({
         subject: "",
         message: "",
-        scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        scheduledAt: formatDate(new Date(), "yyyy-MM-dd'T'HH:mm"),
         type: "marketing"
       });
       setSelectedCustomers([]);
@@ -718,7 +738,7 @@ export default function AdminPanel() {
   };
 
   const chartData = purchases.reduce((acc: any[], p) => {
-    const date = format(new Date(p.timestamp), "dd MMM", { locale: es });
+    const date = formatDate(new Date(p.timestamp), "dd MMM", { locale: es });
     const existing = acc.find(a => a.date === date);
     if (existing) existing.count++;
     else acc.push({ date, count: 1 });
@@ -906,9 +926,15 @@ export default function AdminPanel() {
                   <h1 className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>¡Hola, {business.name}!</h1>
                   <p className={cn("mt-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Aquí tienes un resumen de lo que está pasando hoy.</p>
                 </div>
-                <div className="hidden md:block">
-                  <p className={cn("text-sm font-medium", business?.darkModeEnabled ? "text-slate-500" : "text-gray-400")}>
-                    {format(new Date(), "EEEE, d 'de' MMMM", { locale: es })}
+                <div className="hidden md:block text-right">
+                  <p className={cn("text-sm font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                    {formatDate(new Date(), "HH:mm")}
+                  </p>
+                  <p className={cn("text-xs font-medium", business?.darkModeEnabled ? "text-slate-500" : "text-gray-400")}>
+                    {formatDate(new Date(), "EEEE, d 'de' MMMM", { locale: es })}
+                  </p>
+                  <p className={cn("text-[10px] uppercase tracking-wider", business?.darkModeEnabled ? "text-slate-600" : "text-gray-300")}>
+                    Zona: {business.timezone || "America/Caracas"}
                   </p>
                 </div>
               </div>
@@ -985,7 +1011,7 @@ export default function AdminPanel() {
                               <p className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
                                 {customer?.name || customer?.phone}
                               </p>
-                              <p className="text-xs text-gray-500">{format(new Date(purchase.timestamp), "d 'de' MMM, HH:mm", { locale: es })}</p>
+                              <p className="text-xs text-gray-500">{formatDate(new Date(purchase.timestamp), "d 'de' MMM, HH:mm", { locale: es })}</p>
                             </div>
                           </div>
                           <div className="text-right">
@@ -1053,7 +1079,7 @@ export default function AdminPanel() {
                           <div className="mt-1 h-2 w-2 rounded-full bg-orange-500 animate-pulse"></div>
                           <div>
                             <p className={cn("text-sm font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{reminder.subject}</p>
-                            <p className="text-xs text-gray-500">{format(new Date(reminder.scheduledAt), "d 'de' MMM, HH:mm", { locale: es })}</p>
+                            <p className="text-xs text-gray-500">{formatDate(new Date(reminder.scheduledAt), "d 'de' MMM, HH:mm", { locale: es })}</p>
                           </div>
                         </div>
                       ))}
@@ -1601,6 +1627,51 @@ export default function AdminPanel() {
                     </div>
                   </div>
                 </div>
+
+                <div className={cn(
+                  "p-8 rounded-3xl shadow-sm border space-y-6 md:col-span-2 transition-colors duration-300",
+                  business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
+                )}>
+                  <h2 className={cn("text-xl font-bold flex items-center space-x-2", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                    <Clock className="h-5 w-5 text-orange-600" />
+                    <span>Configuración Regional</span>
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                      <label className={cn("block text-sm font-medium", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Zona Horaria</label>
+                      <select 
+                        value={business.timezone || "America/Caracas"}
+                        onChange={(e) => setBusiness({ ...business, timezone: e.target.value })}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border transition-all focus:ring-2 focus:ring-orange-500 outline-none",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
+                      >
+                        <option value="America/Caracas">Caracas, Venezuela (GMT-4)</option>
+                        <option value="America/Bogota">Bogotá, Colombia (GMT-5)</option>
+                        <option value="America/Mexico_City">Ciudad de México, México (GMT-6)</option>
+                        <option value="America/Santiago">Santiago, Chile (GMT-3)</option>
+                        <option value="America/Argentina/Buenos_Aires">Buenos Aires, Argentina (GMT-3)</option>
+                        <option value="America/Lima">Lima, Perú (GMT-5)</option>
+                        <option value="America/Guayaquil">Guayaquil, Ecuador (GMT-5)</option>
+                        <option value="America/Panama">Panamá (GMT-5)</option>
+                        <option value="America/Costa_Rica">San José, Costa Rica (GMT-6)</option>
+                        <option value="America/El_Salvador">San Salvador, El Salvador (GMT-6)</option>
+                        <option value="America/Guatemala">Guatemala (GMT-6)</option>
+                        <option value="America/Honduras">Tegucigalpa, Honduras (GMT-6)</option>
+                        <option value="America/Managua">Managua, Nicaragua (GMT-6)</option>
+                        <option value="America/Santo_Domingo">Santo Domingo, Rep. Dominicana (GMT-4)</option>
+                        <option value="America/Puerto_Rico">San Juan, Puerto Rico (GMT-4)</option>
+                        <option value="America/Montevideo">Montevideo, Uruguay (GMT-3)</option>
+                        <option value="America/Asuncion">Asunción, Paraguay (GMT-3)</option>
+                        <option value="America/La_Paz">La Paz, Bolivia (GMT-4)</option>
+                        <option value="Europe/Madrid">Madrid, España (GMT+1)</option>
+                        <option value="UTC">UTC (GMT+0)</option>
+                      </select>
+                      <p className={cn("text-xs", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Esto asegura que las notificaciones programadas se envíen a la hora correcta en tu ciudad.</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}
@@ -1806,7 +1877,7 @@ export default function AdminPanel() {
                               </div>
                             </td>
                             <td className={cn("px-6 py-4 text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>
-                              {c.lastPurchaseAt ? format(new Date(c.lastPurchaseAt), "dd MMM, HH:mm", { locale: es }) : "Nunca"}
+                              {c.lastPurchaseAt ? formatDate(new Date(c.lastPurchaseAt), "dd MMM, HH:mm", { locale: es }) : "Nunca"}
                             </td>
                             <td className="px-6 py-4 text-right space-x-2">
                               <button onClick={() => setIsAddingPurchase(c.id)} className={cn("p-2 transition-all", business?.darkModeEnabled ? "text-slate-400 hover:text-green-400" : "text-gray-400 hover:text-green-600")} title="Registrar Venta/Sello"><PlusCircle className="h-5 w-5" /></button>
@@ -2049,7 +2120,7 @@ export default function AdminPanel() {
                                 business?.darkModeEnabled ? "hover:bg-slate-800/50" : "hover:bg-gray-50/50"
                               )}>
                                 <td className={cn("px-6 py-4 text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-600")}>
-                                  {format(new Date(p.timestamp), "dd/MM/yyyy HH:mm")}
+                                  {formatDate(new Date(p.timestamp), "dd/MM/yyyy HH:mm")}
                                 </td>
                                 <td className="px-6 py-4">
                                   <p className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{cust?.name || "Cliente"}</p>
@@ -2382,7 +2453,7 @@ export default function AdminPanel() {
                             reminders.map(reminder => (
                               <tr key={reminder.id} className={cn("transition-all", business?.darkModeEnabled ? "hover:bg-slate-800/50" : "hover:bg-gray-50/50")}>
                                 <td className={cn("px-6 py-4 whitespace-nowrap text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-600")}>
-                                  {format(new Date(reminder.scheduledAt), "dd/MM/yyyy HH:mm")}
+                                  {formatDate(new Date(reminder.scheduledAt), "dd/MM/yyyy HH:mm")}
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <span className={cn(
@@ -2734,9 +2805,9 @@ export default function AdminPanel() {
                       )}>
                         <div className="flex items-center space-x-3">
                           <div className="h-8 w-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">{customerHistory.length - i}</div>
-                          <p className={cn("font-medium", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{format(new Date(p.timestamp), "PPPP", { locale: es })}</p>
+                          <p className={cn("font-medium", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{formatDate(new Date(p.timestamp), "PPPP", { locale: es })}</p>
                         </div>
-                        <p className="text-xs text-gray-500">{format(new Date(p.timestamp), "HH:mm:ss")}</p>
+                        <p className="text-xs text-gray-500">{formatDate(new Date(p.timestamp), "HH:mm:ss")}</p>
                       </div>
                     ))}
                   </div>

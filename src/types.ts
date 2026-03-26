@@ -24,6 +24,7 @@ export interface Business {
   currency?: string;
   themeColor?: string;
   darkModeEnabled?: boolean;
+  timezone?: string; // e.g., 'America/Caracas'
   // New: Loyalty Levels Config
   levels?: {
     silver: { minSpent: number; multiplier: number };

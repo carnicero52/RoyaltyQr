@@ -68,6 +68,7 @@ const Dashboard: React.FC = () => {
         currency: 'USD',
         themeColor: '#ea580c',
         darkModeEnabled: false,
+        timezone: 'America/Caracas',
         slogan: '¡Fideliza a tus clientes!',
         description: 'Programa de recompensas para clientes frecuentes.'
       });

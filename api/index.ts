@@ -379,7 +379,7 @@ async function startServer() {
         for (const doc of remindersSnapshot.docs) {
           const reminder = doc.data();
           if (reminder.scheduledAt > now) {
-            console.log(`[Scheduler] Reminder ${doc.id} is for the future (${reminder.scheduledAt}), skipping.`);
+            console.log(`[Scheduler] Reminder ${doc.id} is for the future (${reminder.scheduledAt}). Business TZ: ${business.timezone || 'America/Caracas'}. Current UTC: ${now}`);
             continue;
           }
 
