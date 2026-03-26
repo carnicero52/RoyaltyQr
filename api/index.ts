@@ -34,31 +34,59 @@ const getDb = async () => {
   try {
     let serverApp;
     if (admin.apps.length === 0) {
-      // In Cloud Run/Vercel, initializeApp() without arguments uses default credentials
-      // which is usually the most reliable way to get permissions.
-      serverApp = admin.initializeApp();
-      console.log("[Firebase] Initialized with default credentials");
+      try {
+        // Try default initialization first - most reliable in Cloud Run
+        serverApp = admin.initializeApp();
+        console.log("[Firebase] Initialized with default environment credentials");
+      } catch (e) {
+        if (firebaseConfig.projectId) {
+          serverApp = admin.initializeApp({ projectId: firebaseConfig.projectId });
+          console.log("[Firebase] Initialized with projectId from config:", firebaseConfig.projectId);
+        } else {
+          throw e;
+        }
+      }
     } else {
       serverApp = admin.app();
     }
     
     const dbId = firebaseConfig.firestoreDatabaseId;
-    // If we have a specific database ID, use it. 
-    // Note: getFirestore(serverApp, dbId) is the correct way to access named databases.
-    db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
-    return db;
-  } catch (err) {
-    console.error("[Firebase] Default Init Error, trying with projectId:", err);
-    try {
-      if (admin.apps.length > 0) {
-        await admin.app().delete();
+    const useNamedDb = dbId && dbId !== "(default)";
+    
+    if (useNamedDb) {
+      try {
+        console.log(`[Firebase] Attempting to connect to named database: ${dbId}`);
+        db = getFirestore(serverApp, dbId);
+        // Test the named database
+        await db.collection("businesses").limit(1).get();
+        console.log(`[Firebase] Connected to named database: ${dbId}`);
+      } catch (err: any) {
+        console.warn(`[Firebase] Named database ${dbId} failed:`, err.message);
+        if (err.message?.includes("NOT_FOUND") || err.message?.includes("database not found") || err.code === 5) {
+          console.log("[Firebase] Falling back to (default) database...");
+          db = getFirestore(serverApp);
+        } else {
+          throw err;
+        }
       }
-      const serverApp = admin.initializeApp({ projectId: firebaseConfig.projectId });
-      const dbId = firebaseConfig.firestoreDatabaseId;
-      db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
+    } else {
+      db = getFirestore(serverApp);
+    }
+    
+    // Final verification
+    await db.collection("businesses").limit(1).get();
+    console.log("[Firebase] Firestore connection verified");
+    
+    return db;
+  } catch (err: any) {
+    console.error("[Firebase] Critical Init Error:", err);
+    // Last ditch effort: default everything
+    try {
+      if (admin.apps.length === 0) admin.initializeApp();
+      db = getFirestore(admin.app());
       return db;
-    } catch (innerErr) {
-      console.error("[Firebase] Fallback Init Error:", innerErr);
+    } catch (lastErr) {
+      console.error("[Firebase] Last ditch effort failed:", lastErr);
       return null;
     }
   }
@@ -230,38 +258,23 @@ async function startServer() {
     }
     const now = new Date().toISOString();
     try {
-      console.log(`[Scheduler] Checking pending reminders for project: ${firebaseConfig.projectId}, database: ${firebaseConfig.firestoreDatabaseId || '(default)'}...`);
+      console.log(`[Scheduler] Checking pending reminders...`);
       
-      // Instead of collectionGroup (which requires manual indexing), 
-      // we iterate through businesses to be more robust.
-      // We use a try-catch specifically for this call to diagnose permission issues.
-      let businessesSnapshot;
-      try {
-        businessesSnapshot = await firestore.collection("businesses").get();
-        console.log(`[Scheduler] Found ${businessesSnapshot.docs.length} businesses`);
-      } catch (err: any) {
-        if (err.message?.includes("PERMISSION_DENIED")) {
-          console.error("[Scheduler] PERMISSION_DENIED on 'businesses' collection. This usually means the service account lacks 'Cloud Datastore User' or 'Firebase Admin' roles for the project/database.");
-          // Try to fallback to default database if it was using a named one
-          if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)") {
-            console.log("[Scheduler] Attempting fallback to default database...");
-            const defaultDb = getFirestore(admin.app());
-            businessesSnapshot = await defaultDb.collection("businesses").get();
-            // If fallback works, update the global db
-            db = defaultDb;
-          } else {
-            throw err;
-          }
-        } else {
-          throw err;
-        }
+      const businessesSnapshot = await firestore.collection("businesses").get();
+      if (businessesSnapshot.empty) {
+        console.log("[Scheduler] No businesses found in database.");
+        return;
       }
+      
+      console.log(`[Scheduler] Found ${businessesSnapshot.docs.length} businesses`);
       
       for (const bizDoc of businessesSnapshot.docs) {
         const business = bizDoc.data();
         const remindersSnapshot = await bizDoc.ref.collection("reminders")
           .where("status", "==", "pending")
           .get();
+
+        if (remindersSnapshot.empty) continue;
 
         for (const doc of remindersSnapshot.docs) {
           const reminder = doc.data();
