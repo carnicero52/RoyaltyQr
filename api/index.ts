@@ -460,6 +460,8 @@ async function startServer() {
   checkReminders();
   setInterval(checkReminders, 60000);
 
+  console.log(`[Server] NODE_ENV: ${process.env.NODE_ENV}, VERCEL: ${process.env.VERCEL}`);
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
     const { createServer: createViteServer } = await import("vite");
