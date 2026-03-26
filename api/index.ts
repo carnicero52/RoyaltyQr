@@ -69,32 +69,57 @@ const getDb = async () => {
     
     let serverApp;
     if (admin.apps.length === 0) {
-      // Priority 1: Explicit projectId from config
-      const configProjectId = firebaseConfig?.projectId;
-      // Priority 2: Environment variables
-      const envProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
-      
-      const finalProjectId = (configProjectId && configProjectId !== "TODO_PROJECT_ID") ? configProjectId : envProjectId;
-      
-      if (finalProjectId) {
+      // Priority 0: Service Account from Environment Variable (Best for Vercel/External)
+      const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+      if (serviceAccountVar) {
         try {
-          serverApp = admin.initializeApp({ 
-            projectId: finalProjectId,
-            storageBucket: firebaseConfig?.storageBucket
+          console.log("[Firebase] Attempting initialization with Service Account from ENV...");
+          const serviceAccount = JSON.parse(serviceAccountVar);
+          serverApp = admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            storageBucket: firebaseConfig?.storageBucket || `${serviceAccount.project_id}.appspot.com`
           });
-          console.log("[Firebase] Initialized with explicit projectId:", finalProjectId);
+          console.log("[Firebase] Initialized with Service Account from ENV");
         } catch (e: any) {
-          console.warn("[Firebase] Explicit init failed, trying default:", e.message);
-          serverApp = admin.initializeApp();
+          console.error("[Firebase] Service Account ENV init failed:", e.message);
         }
-      } else {
-        console.log("[Firebase] No valid projectId found, trying default initialization...");
-        try {
-          serverApp = admin.initializeApp();
-          console.log("[Firebase] Initialized with default credentials");
-        } catch (e: any) {
-          console.error("[Firebase] Default initialization failed:", e.message);
-          throw e;
+      }
+
+      if (!serverApp) {
+        // Priority 1: Explicit projectId from config
+        const configProjectId = firebaseConfig?.projectId;
+        // Priority 2: Environment variables
+        const envProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+        
+        const finalProjectId = (configProjectId && configProjectId !== "TODO_PROJECT_ID") ? configProjectId : envProjectId;
+        
+        if (finalProjectId) {
+          try {
+            console.log("[Firebase] Attempting initialization with projectId:", finalProjectId);
+            serverApp = admin.initializeApp({ 
+              projectId: finalProjectId,
+              storageBucket: firebaseConfig?.storageBucket
+            });
+            console.log("[Firebase] Initialized with explicit projectId:", finalProjectId);
+          } catch (e: any) {
+            console.warn("[Firebase] Explicit init failed, trying default:", e.message);
+            try {
+              serverApp = admin.initializeApp();
+              console.log("[Firebase] Initialized with default credentials");
+            } catch (defaultErr: any) {
+              console.error("[Firebase] Default initialization failed:", defaultErr.message);
+              throw defaultErr;
+            }
+          }
+        } else {
+          console.log("[Firebase] No valid projectId found, trying default initialization...");
+          try {
+            serverApp = admin.initializeApp();
+            console.log("[Firebase] Initialized with default credentials");
+          } catch (e: any) {
+            console.error("[Firebase] Default initialization failed:", e.message);
+            throw e;
+          }
         }
       }
     } else {
@@ -133,6 +158,12 @@ const getDb = async () => {
     return db;
   } catch (err: any) {
     console.error("[Firebase] Critical Init Error:", err.message);
+    
+    let detailedError = `Firebase Initialization Failed: ${err.message}.`;
+    if (err.message?.includes("Could not load the default credentials")) {
+      detailedError += " \n\nINSTRUCTIONS FOR VERCEL: \n1. Go to Firebase Console > Project Settings > Service Accounts. \n2. Click 'Generate new private key'. \n3. Copy the JSON content. \n4. In Vercel, add an environment variable 'FIREBASE_SERVICE_ACCOUNT' and paste the JSON content as the value. \n5. Redeploy your app.";
+    }
+    
     // Last ditch effort: default everything
     try {
       if (admin.apps.length === 0) {
@@ -143,8 +174,7 @@ const getDb = async () => {
       return db;
     } catch (lastErr: any) {
       console.error("[Firebase] Last ditch effort failed:", lastErr.message);
-      // If we still fail, throw a more descriptive error
-      throw new Error(`Firebase Initialization Failed: ${err.message}. (Last ditch error: ${lastErr.message}). ProjectId in config: ${firebaseConfig?.projectId || 'none'}`);
+      throw new Error(`${detailedError} (Last ditch error: ${lastErr.message}). ProjectId: ${firebaseConfig?.projectId || 'none'}`);
     }
   }
 };
