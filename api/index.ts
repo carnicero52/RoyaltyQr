@@ -9,68 +9,51 @@ import TelegramBot from "node-telegram-bot-api";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
-// Load config using fs for better ESM compatibility
-const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-
-// Force environment variables BEFORE any other imports
-process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
-process.env.GCLOUD_PROJECT = firebaseConfig.projectId;
-process.env.FIRESTORE_PROJECT_ID = firebaseConfig.projectId;
-
 dotenv.config();
-
-// Initialize Firebase Admin
-let serverApp: admin.app.App | null = null;
-try {
-  if (admin.apps.length === 0) {
-    serverApp = admin.initializeApp({
-      projectId: firebaseConfig.projectId,
-    });
-    console.log("[Firebase] Admin SDK initialized (Default App)");
-  } else {
-    serverApp = admin.app();
-    console.log("[Firebase] Using existing Admin SDK app");
-  }
-} catch (err: any) {
-  console.error("[Firebase] Initialization Error:", err);
-}
-
-// Initialize Firestore
-let db: admin.firestore.Firestore | null = null;
-if (serverApp) {
-  try {
-    const dbId = firebaseConfig.firestoreDatabaseId;
-    db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
-    console.log(`[Firebase] Firestore initialized (DB: ${dbId || 'default'})`);
-  } catch (err: any) {
-    console.error("[Firebase] Firestore Initialization Error:", err);
-  }
-}
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check at top level to ensure it always works
+// Load config
+const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+let firebaseConfig: any = {};
+try {
+  firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+} catch (e) {
+  console.error("[Config] Error loading firebase-applet-config.json:", e);
+}
+
+// Health check at the VERY top
 app.get("/api/health", (req, res) => {
-  try {
-    const healthData = { 
-      status: "ok", 
-      timestamp: new Date().toISOString(),
-      env: process.env.NODE_ENV,
-      firebaseInitialized: !!serverApp,
-      firestoreInitialized: !!db,
-      projectId: serverApp?.options?.projectId || "unknown",
-      databaseId: firebaseConfig?.firestoreDatabaseId || "none",
-      hasGmailEnv: !!(process.env.GMAIL_USER && process.env.GMAIL_PASS),
-      hasTelegramEnv: !!process.env.TELEGRAM_BOT_TOKEN
-    };
-    res.json(healthData);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || "Unknown error in health check" });
-  }
+  res.json({ 
+    status: "ok", 
+    timestamp: new Date().toISOString(),
+    projectId: firebaseConfig?.projectId || "unknown",
+    databaseId: firebaseConfig?.firestoreDatabaseId || "none"
+  });
 });
+
+// Initialize Firebase Admin
+let serverApp: admin.app.App | null = null;
+let db: admin.firestore.Firestore | null = null;
+
+if (firebaseConfig.projectId) {
+  try {
+    if (admin.apps.length === 0) {
+      serverApp = admin.initializeApp({ projectId: firebaseConfig.projectId });
+    } else {
+      serverApp = admin.app();
+    }
+    
+    if (serverApp) {
+      const dbId = firebaseConfig.firestoreDatabaseId;
+      db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
+    }
+  } catch (err: any) {
+    console.error("[Firebase] Init Error:", err);
+  }
+}
 
 // Global error handler
 app.use((err: any, req: any, res: any, next: any) => {
@@ -375,13 +358,13 @@ async function startServer() {
   setInterval(checkReminders, 60000);
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+  if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else if (!process.env.VERCEL) {
+  } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
@@ -389,11 +372,9 @@ async function startServer() {
     });
   }
 
-  if (!process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-    });
-  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+  });
 }
 
 startServer();

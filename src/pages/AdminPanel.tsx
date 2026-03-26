@@ -340,16 +340,30 @@ export default function AdminPanel() {
   const handleTestConnection = async () => {
     setSaving(true);
     try {
-      const response = await fetch(`${window.location.origin}/api/health`);
+      const url = `${window.location.origin}/api/health`;
+      console.log("Testing connection to:", url);
+      const response = await fetch(url);
+      const text = await response.text();
+      
       if (response.ok) {
-        const data = await response.json();
-        alert(`Conexión exitosa. Servidor activo (Project: ${data.projectId})`);
+        try {
+          const data = JSON.parse(text);
+          alert(`Conexión exitosa. Servidor activo (Project: ${data.projectId})`);
+        } catch (e) {
+          alert(`Conexión exitosa (texto): ${text.substring(0, 100)}`);
+        }
       } else {
-        const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-        alert(`Error de conexión: ${response.status} - ${errorData.error || "Sin detalles"}`);
+        let errorMsg = "Unknown error";
+        try {
+          const errorData = JSON.parse(text);
+          errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+          errorMsg = text || errorMsg;
+        }
+        alert(`Error de conexión: ${response.status} - ${errorMsg.substring(0, 200)}`);
       }
     } catch (err: any) {
-      alert(`Error de red: ${err.message}`);
+      alert(`Error de red: ${err.message}\nVerifica que el servidor esté corriendo.`);
     } finally {
       setSaving(false);
     }
