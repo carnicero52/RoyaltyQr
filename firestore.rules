@@ -113,8 +113,8 @@ service cloud.firestore {
       // Create: user must be authenticated
       allow create: if isAuthenticated() && isValidBusiness(request.resource.data);
       
-      // Read: owner or admin
-      allow get: if isAuthorized(businessId);
+      // Read: owner, admin, or public (for PublicPanel)
+      allow get: if true; 
       allow list: if isAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
       
       // Update: owner or admin. Protect ownerUid.
@@ -125,13 +125,24 @@ service cloud.firestore {
       allow delete: if isAuthorized(businessId);
 
       match /customers/{customerId} {
-        allow read: if isAuthorized(businessId);
-        allow write: if isAuthorized(businessId) && (request.method == 'delete' || isValidCustomer(request.resource.data));
+        // Public read for identification in PublicPanel
+        allow get: if true;
+        allow list: if isAuthorized(businessId);
+        
+        // Public update for stamps in PublicPanel
+        allow update: if (isAuthorized(businessId) && isValidCustomer(request.resource.data)) || 
+                        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['couponsCount', 'lastPurchaseAt']) &&
+                         request.resource.data.couponsCount == resource.data.couponsCount + 1);
+        
+        allow create: if isAuthorized(businessId) && isValidCustomer(request.resource.data);
+        allow delete: if isAuthorized(businessId);
       }
 
       match /purchases/{purchaseId} {
         allow read: if isAuthorized(businessId);
-        allow write: if isAuthorized(businessId) && (request.method == 'delete' || isValidPurchase(request.resource.data));
+        // Public create for PublicPanel
+        allow create: if true; 
+        allow update, delete: if isAuthorized(businessId);
       }
 
       match /staff/{staffId} {

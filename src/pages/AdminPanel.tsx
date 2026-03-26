@@ -463,20 +463,18 @@ export default function AdminPanel() {
     const notes = formData.get("notes") as string;
     const referredBy = formData.get("referredBy") as string;
 
-    if (!phone || phone.length < 8) {
-      alert("Por favor ingrese un número de teléfono válido.");
-      return;
-    }
+    // Use phone as ID if provided, otherwise generate a random one
+    const customerId = phone && phone.length >= 8 ? phone : `CUST-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 
-    if (customers.some(c => c.phone === phone)) {
+    if (phone && customers.some(c => c.phone === phone)) {
       alert("Ya existe un cliente con este número de teléfono.");
       return;
     }
 
     try {
       const newCust: Customer = {
-        id: phone,
-        phone,
+        id: customerId,
+        phone: phone || "Sin teléfono",
         name,
         email,
         notes,
@@ -488,7 +486,7 @@ export default function AdminPanel() {
         referredBy: referredBy || undefined,
         referralCount: 0
       };
-      await setDoc(doc(db, "businesses", business!.id, "customers", phone), newCust);
+      await setDoc(doc(db, "businesses", business!.id, "customers", customerId), newCust);
       
       // Si fue referido, dar un bono al referente
       if (referredBy) {
@@ -2622,17 +2620,17 @@ export default function AdminPanel() {
               <form onSubmit={isAddingCustomer ? handleAddCustomer : handleUpdateCustomer} className="p-8 space-y-6">
                 <div className="space-y-4">
                   <div>
-                    <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Número de Teléfono</label>
+                    <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Número de Teléfono (Opcional)</label>
                     <input
                       type="tel"
                       name="phone"
                       defaultValue={isEditingCustomer?.phone}
                       disabled={!!isEditingCustomer}
+                      placeholder="Ej: +584121234567"
                       className={cn(
                         "w-full px-4 py-3 rounded-xl border transition-all focus:ring-2 focus:ring-orange-500 outline-none",
                         business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white disabled:bg-slate-950" : "bg-white border-gray-200 text-gray-900 disabled:bg-gray-50"
                       )}
-                      required
                     />
                   </div>
                   <div>
