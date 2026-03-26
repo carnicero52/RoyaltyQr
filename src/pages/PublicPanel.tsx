@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, query, where, getDocs, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { Business, Customer } from "../types";
@@ -11,6 +11,7 @@ import { cn } from "../lib/utils";
 
 export default function PublicPanel() {
   const { businessId } = useParams<{ businessId: string }>();
+  const navigate = useNavigate();
   const [business, setBusiness] = useState<Business | null>(null);
   const [phone, setPhone] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -169,10 +170,19 @@ export default function PublicPanel() {
   if (!business) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="text-center max-w-md">
+        <div className="text-center max-w-md bg-white p-8 rounded-[2rem] shadow-xl border border-gray-100">
           <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900">Negocio no encontrado</h1>
+          <h1 className="text-2xl font-bold text-gray-900">NEGOCIO NO ENCONTRADO</h1>
           <p className="text-gray-600 mt-2">El enlace que seguiste parece ser inválido o el negocio ya no existe.</p>
+          <div className="mt-6 p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <p className="text-[10px] text-slate-400 font-mono break-all">ID: {businessId}</p>
+          </div>
+          <button 
+            onClick={() => navigate("/")}
+            className="mt-8 w-full bg-orange-600 text-white py-4 rounded-2xl font-bold hover:bg-orange-700 transition-all shadow-lg shadow-orange-200"
+          >
+            Volver al Inicio
+          </button>
         </div>
       </div>
     );

@@ -134,9 +134,11 @@ const getDb = async () => {
 };
 
 // Notification Logic
+// Notification Logic
 const sendNotification = async ({ type, data, config, message: customMessage, subject: customSubject, toEmail, toPhone, toTelegram }: any) => {
   const results: any = { email: null, telegram: null, whatsapp: null };
-  console.log(`[Notification] Attempting to send ${type} to ${toEmail || toPhone || toTelegram || 'unknown'}`);
+  const target = toEmail || toPhone || toTelegram || 'business owner';
+  console.log(`[Notification] [${new Date().toISOString()}] Attempting to send "${type}" to ${target}`);
   
   const message = customMessage || `
     🔔 Fideliza Notification: ${type}
@@ -155,7 +157,7 @@ const sendNotification = async ({ type, data, config, message: customMessage, su
 
     if (gUser && gPass) {
       try {
-        console.log(`[Notification] Sending Email to ${emailTarget} using ${gUser}`);
+        console.log(`[Notification] [Email] Sending to ${emailTarget} via ${gUser}`);
         const transporter = nodemailer.createTransport({
           service: 'gmail',
           auth: { user: gUser, pass: gPass },
@@ -168,13 +170,13 @@ const sendNotification = async ({ type, data, config, message: customMessage, su
           text: message,
         });
         results.email = { success: true };
-        console.log(`[Notification] Email sent successfully to ${emailTarget}`);
+        console.log(`[Notification] [Email] SUCCESS: Sent to ${emailTarget}`);
       } catch (err: any) {
-        console.error("[Notification] Email Error:", err);
+        console.error(`[Notification] [Email] ERROR for ${emailTarget}:`, err.message);
         results.email = { success: false, error: err.message };
       }
     } else {
-      console.warn("[Notification] Gmail credentials not set, skipping email");
+      console.warn("[Notification] [Email] SKIP: Credentials missing");
       results.email = { success: false, error: "Email credentials not configured" };
     }
   }
@@ -186,17 +188,17 @@ const sendNotification = async ({ type, data, config, message: customMessage, su
     
     if (token && chatId) {
       try {
-        console.log(`[Notification] Sending Telegram to ${chatId}`);
+        console.log(`[Notification] [Telegram] Sending to ${chatId}`);
         const tBot = new TelegramBot(token, { polling: false });
         await tBot.sendMessage(chatId, message);
         results.telegram = { success: true };
-        console.log(`[Notification] Telegram sent successfully to ${chatId}`);
+        console.log(`[Notification] [Telegram] SUCCESS: Sent to ${chatId}`);
       } catch (err: any) {
-        console.error("[Notification] Telegram Error:", err);
+        console.error(`[Notification] [Telegram] ERROR for ${chatId}:`, err.message);
         results.telegram = { success: false, error: err.message };
       }
     } else {
-      console.warn("[Notification] Telegram token or chatId not set, skipping telegram");
+      console.warn("[Notification] [Telegram] SKIP: Token or ChatId missing");
       results.telegram = { success: false, error: "Telegram credentials not configured" };
     }
   }
@@ -208,23 +210,24 @@ const sendNotification = async ({ type, data, config, message: customMessage, su
     
     if (phone && phone.trim() !== "" && apiKey && apiKey.trim() !== "") {
       try {
-        const cleanPhone = phone.replace(/\+/g, '');
-        console.log(`[Notification] Sending WhatsApp to ${cleanPhone}`);
+        const cleanPhone = phone.replace(/\+/g, '').replace(/\s/g, '');
+        console.log(`[Notification] [WhatsApp] Sending to ${cleanPhone}`);
         const url = `https://api.callmebot.com/whatsapp.php?phone=${cleanPhone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
         const response = await fetch(url);
         if (response.ok) {
           results.whatsapp = { success: true };
-          console.log(`[Notification] WhatsApp sent successfully to ${cleanPhone}`);
+          console.log(`[Notification] [WhatsApp] SUCCESS: Sent to ${cleanPhone}`);
         } else {
           const text = await response.text();
-          results.whatsapp = { success: false, error: `CallMeBot returned ${response.status}: ${text}` };
+          console.error(`[Notification] [WhatsApp] ERROR: CallMeBot returned ${response.status}: ${text}`);
+          results.whatsapp = { success: false, error: `CallMeBot error (${response.status}): ${text}` };
         }
       } catch (err: any) {
-        console.error("[Notification] WhatsApp Error:", err);
+        console.error(`[Notification] [WhatsApp] ERROR for ${phone}:`, err.message);
         results.whatsapp = { success: false, error: err.message };
       }
     } else if (config.whatsapp) {
-      console.warn("[Notification] WhatsApp phone or apiKey not set, skipping whatsapp");
+      console.warn("[Notification] [WhatsApp] SKIP: Phone or API Key missing");
       results.whatsapp = { success: false, error: "WhatsApp credentials not configured" };
     }
   }
@@ -235,7 +238,10 @@ const sendNotification = async ({ type, data, config, message: customMessage, su
 // Simple Scheduler for Reminders
 let isChecking = false;
 const checkReminders = async () => {
-  if (isChecking) return;
+  if (isChecking) {
+    console.log("[Scheduler] Check already in progress, skipping...");
+    return;
+  }
   isChecking = true;
   
   try {
@@ -245,11 +251,11 @@ const checkReminders = async () => {
       return;
     }
     const now = new Date().toISOString();
-    console.log(`[Scheduler] Checking pending reminders at ${now}...`);
+    console.log(`[Scheduler] [${now}] START: Checking pending reminders...`);
     
     const businessesSnapshot = await firestore.collection("businesses").get();
     if (businessesSnapshot.empty) {
-      console.log("[Scheduler] No businesses found in database.");
+      console.log("[Scheduler] No businesses found.");
       return;
     }
     
@@ -266,17 +272,18 @@ const checkReminders = async () => {
         const reminder = doc.data();
         
         if (!reminder.scheduledAt) {
-          console.warn(`[Scheduler] Reminder ${doc.id} has no scheduledAt, skipping.`);
+          console.warn(`[Scheduler] [${bizDoc.id}] Reminder ${doc.id} has no scheduledAt, skipping.`);
           continue;
         }
 
+        // String comparison works for ISO dates
         if (reminder.scheduledAt > now) {
-          console.log(`[Scheduler] Reminder ${doc.id} is for the future (${reminder.scheduledAt}). Business TZ: ${business.timezone || 'America/Caracas'}. Current UTC: ${now}`);
+          console.log(`[Scheduler] [${bizDoc.id}] Reminder ${doc.id} is for the future (${reminder.scheduledAt}). Current UTC: ${now}`);
           continue;
         }
 
         processedCount++;
-        console.log(`[Scheduler] Processing reminder ${doc.id} (Scheduled: ${reminder.scheduledAt})`);
+        console.log(`[Scheduler] [${bizDoc.id}] Processing reminder ${doc.id} (Scheduled: ${reminder.scheduledAt})`);
 
         const config = {
           email: business.ownerEmail,
@@ -295,7 +302,7 @@ const checkReminders = async () => {
           let errors: string[] = [];
 
           if (reminder.customerIds && reminder.customerIds.length > 0) {
-            console.log(`[Scheduler] Sending reminder ${doc.id} to ${reminder.customerIds.length} customers`);
+            console.log(`[Scheduler] [${bizDoc.id}] Sending to ${reminder.customerIds.length} customers`);
             for (const customerId of reminder.customerIds) {
               const customerDoc = await bizDoc.ref.collection("customers").doc(customerId).get();
               const customer = customerDoc.data();
@@ -318,7 +325,7 @@ const checkReminders = async () => {
               }
             }
           } else {
-            console.log(`[Scheduler] Sending reminder ${doc.id} to business owner`);
+            console.log(`[Scheduler] [${bizDoc.id}] Sending to business owner`);
             const results = await sendNotification({
               type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
               message: reminder.message,
@@ -333,34 +340,32 @@ const checkReminders = async () => {
             });
           }
 
-          const statusMessage = errors.length > 0 ? [...new Set(errors)].join(", ") : undefined;
+          const statusMessage = errors.length > 0 ? [...new Set(errors)].join(", ").substring(0, 500) : undefined;
           if (anySuccess) {
             await doc.ref.update({ 
               status: "sent",
-              statusMessage: statusMessage
+              statusMessage: statusMessage || "Enviado con éxito"
             });
-            console.log(`[Scheduler] Reminder ${doc.id} marked as sent ${statusMessage ? 'with warnings' : ''}`);
+            console.log(`[Scheduler] [${bizDoc.id}] SUCCESS: Reminder ${doc.id} marked as sent`);
           } else {
             await doc.ref.update({ 
               status: "failed",
-              statusMessage: statusMessage || "No se pudo enviar por ningún medio"
+              statusMessage: statusMessage || "No se pudo enviar por ningún medio configurado"
             });
-            console.warn(`[Scheduler] Reminder ${doc.id} marked as failed: ${statusMessage}`);
+            console.warn(`[Scheduler] [${bizDoc.id}] FAILED: Reminder ${doc.id} marked as failed`);
           }
         } catch (sendError: any) {
-          console.error(`[Scheduler] Failed to send reminder ${doc.id}:`, sendError);
+          console.error(`[Scheduler] [${bizDoc.id}] CRITICAL ERROR for reminder ${doc.id}:`, sendError.message);
           await doc.ref.update({ 
             status: "failed",
-            statusMessage: sendError.message
+            statusMessage: `Error crítico: ${sendError.message}`
           });
         }
       }
     }
-    if (processedCount > 0) {
-      console.log(`[Scheduler] Finished processing ${processedCount} reminders.`);
-    }
+    console.log(`[Scheduler] [${now}] END: Processed ${processedCount} reminders.`);
   } catch (error: any) {
-    console.error("[Scheduler] Error in interval:", error);
+    console.error("[Scheduler] CRITICAL ERROR in checkReminders:", error);
   } finally {
     isChecking = false;
   }

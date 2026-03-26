@@ -435,6 +435,7 @@ export default function AdminPanel() {
   const handleProcessReminders = async () => {
     if (!business) return;
     setSaving(true);
+    setStatus({ type: "warning", message: "Procesando notificaciones pendientes..." });
     try {
       const response = await fetch("/api/process-reminders", {
         method: "POST",
@@ -442,7 +443,10 @@ export default function AdminPanel() {
       });
       const data = await response.json();
       if (data.success) {
-        setStatus({ type: "success", message: "Proceso de notificaciones completado." });
+        setStatus({ 
+          type: "success", 
+          message: `Proceso completado. ${data.processedCount || 0} recordatorios procesados.` 
+        });
       } else {
         setStatus({ type: "error", message: `Error: ${data.error}` });
       }
@@ -2537,8 +2541,37 @@ export default function AdminPanel() {
                     "p-6 rounded-3xl border shadow-sm transition-colors duration-300",
                     business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
                   )}>
-                    <h3 className={cn("font-bold mb-4", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Próximas Fechas Especiales</h3>
+                    <h3 className={cn("font-bold mb-4 flex items-center space-x-2", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                      <Clock className="h-4 w-4 text-orange-600" />
+                      <span>Estado del Programador</span>
+                    </h3>
                     <div className="space-y-4">
+                      <div className={cn(
+                        "p-4 rounded-2xl border transition-colors duration-300",
+                        business?.darkModeEnabled ? "bg-slate-800 border-slate-700" : "bg-slate-50 border-slate-100"
+                      )}>
+                        <p className={cn("text-xs font-medium mb-2", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>
+                          Para que las notificaciones programadas se envíen automáticamente, se recomienda configurar un Cron Job externo.
+                        </p>
+                        <div className="p-2 bg-black/5 rounded-lg font-mono text-[10px] break-all mb-3">
+                          {window.location.origin}/api/process-reminders
+                        </div>
+                        <button
+                          onClick={handleProcessReminders}
+                          disabled={saving}
+                          className="w-full py-2 bg-orange-600/10 text-orange-600 rounded-xl text-xs font-bold hover:bg-orange-600/20 transition-all flex items-center justify-center space-x-2"
+                        >
+                          {saving ? (
+                            <div className="animate-spin h-3 w-3 border-b-2 border-orange-600 rounded-full"></div>
+                          ) : (
+                            <>
+                              <RefreshCw className="h-3 w-3" />
+                              <span>Procesar Pendientes Ahora</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
                       <div className={cn(
                         "p-4 rounded-2xl border transition-colors duration-300",
                         business?.darkModeEnabled ? "bg-orange-900/20 border-orange-900/30" : "bg-orange-50 border-orange-100"
