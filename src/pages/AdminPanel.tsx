@@ -22,6 +22,36 @@ import { es } from "date-fns/locale";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-center space-y-4">
+          <h1 className="text-2xl font-bold text-red-600">Algo salió mal</h1>
+          <p className="text-gray-600">Hubo un error inesperado. Por favor, recarga la página.</p>
+          <pre className="text-xs bg-gray-100 p-4 rounded-xl overflow-auto max-w-full text-left">
+            {this.state.error?.message || String(this.state.error)}
+          </pre>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-6 py-2 bg-orange-600 text-white rounded-xl font-bold"
+          >
+            Recargar
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function AdminPanel() {
   const { businessId } = useParams<{ businessId: string }>();
   const navigate = useNavigate();
@@ -205,36 +235,6 @@ export default function AdminPanel() {
     setStatus({ message: "Error de permisos o conexión con la base de datos.", type: 'error' });
     throw new Error(JSON.stringify(errInfo));
   };
-
-  class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
-    constructor(props: any) {
-      super(props);
-      this.state = { hasError: false, error: null };
-    }
-    static getDerivedStateFromError(error: any) {
-      return { hasError: true, error };
-    }
-    render() {
-      if (this.state.hasError) {
-        return (
-          <div className="p-8 text-center space-y-4">
-            <h1 className="text-2xl font-bold text-red-600">Algo salió mal</h1>
-            <p className="text-gray-600">Hubo un error inesperado. Por favor, recarga la página.</p>
-            <pre className="text-xs bg-gray-100 p-4 rounded-xl overflow-auto max-w-full text-left">
-              {this.state.error?.message || String(this.state.error)}
-            </pre>
-            <button 
-              onClick={() => window.location.reload()}
-              className="px-6 py-2 bg-orange-600 text-white rounded-xl font-bold"
-            >
-              Recargar
-            </button>
-          </div>
-        );
-      }
-      return this.props.children;
-    }
-  }
 
   const handleScheduleReminder = async (e: React.FormEvent) => {
     e.preventDefault();
