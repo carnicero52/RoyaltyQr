@@ -143,6 +143,13 @@ export default function PublicPanel() {
           config: {
             email: business?.ownerEmail,
             telegram: !!business?.telegramChatId,
+            telegramToken: business?.telegramToken,
+            telegramChatId: business?.telegramChatId,
+            whatsapp: !!business?.whatsappEnabled,
+            whatsappPhone: business?.whatsappPhone,
+            whatsappApiKey: business?.whatsappApiKey,
+            gmailUser: business?.gmailUser,
+            gmailAppPass: business?.gmailAppPass,
           }
         }),
       });

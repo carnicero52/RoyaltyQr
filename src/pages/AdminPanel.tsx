@@ -1343,6 +1343,44 @@ export default function AdminPanel() {
                         placeholder="Token de tu Bot de Telegram"
                       />
                     </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!business.telegramChatId || !business.telegramToken) {
+                          alert("Por favor ingresa el Chat ID y el Bot Token");
+                          return;
+                        }
+                        setStatus({ message: "Enviando prueba...", type: 'warning' });
+                        try {
+                          const res = await fetch("/api/notify", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              type: "Prueba de Conexión",
+                              message: "¡Hola! Esta es una prueba de conexión de Telegram desde Fideliza.",
+                              config: {
+                                telegram: true,
+                                telegramToken: business.telegramToken,
+                                telegramChatId: business.telegramChatId,
+                              },
+                              toTelegram: business.telegramChatId,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data.success && data.results?.telegram?.success) {
+                            setStatus({ message: "¡Prueba enviada con éxito! Revisa tu Telegram.", type: 'success' });
+                          } else {
+                            throw new Error(data.results?.telegram?.error || "Error desconocido");
+                          }
+                        } catch (err: any) {
+                          setStatus({ message: `Error: ${err.message}`, type: 'error' });
+                        }
+                      }}
+                      className="mt-2 w-full py-2 px-4 bg-sky-100 text-sky-700 rounded-xl font-bold hover:bg-sky-200 transition-all flex items-center justify-center space-x-2"
+                    >
+                      <Send className="h-4 w-4" />
+                      <span>Probar Conexión Telegram</span>
+                    </button>
 
                     <div className={cn(
                       "flex items-center justify-between p-4 rounded-2xl transition-colors duration-300",

@@ -33,34 +33,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check - Minimal and fast
-app.get("/api/health", async (req, res) => {
-  let dbStatus = "not_initialized";
-  let dbError = null;
-  try {
-    const firestore = await getDb();
-    dbStatus = firestore ? "connected" : "failed";
-    
-    // Trigger scheduler on health check to ensure it runs in serverless environments
-    if (firestore) {
-      checkReminders().catch(e => console.error("[HealthCheck] Scheduler trigger failed:", e));
-    }
-  } catch (e: any) {
-    dbStatus = "error";
-    dbError = e.message;
-  }
-
-  res.json({ 
-    status: "ok", 
-    timestamp: new Date().toISOString(),
-    projectId: firebaseConfig?.projectId || "unknown",
-    dbStatus,
-    dbError,
-    isVercel: !!process.env.VERCEL,
-    envProjectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "none"
-  });
-});
-
 // Lazy Firebase Init Helper
 let db: admin.firestore.Firestore | null = null;
 const getDb = async () => {
@@ -70,11 +42,10 @@ const getDb = async () => {
     console.log("[Firebase] Starting initialization...");
     console.log("[Firebase] Config loaded:", !!firebaseConfig);
     console.log("[Firebase] Config ProjectId:", firebaseConfig?.projectId);
-    console.log("[Firebase] Env ProjectId:", process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT);
     
     let serverApp;
     if (admin.apps.length === 0) {
-      // Priority 0: Service Account from Environment Variable (Best for Vercel/External)
+      // Priority 0: Service Account from Environment Variable
       const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
       if (serviceAccountVar) {
         try {
@@ -91,11 +62,8 @@ const getDb = async () => {
       }
 
       if (!serverApp) {
-        // Priority 1: Explicit projectId from config
         const configProjectId = firebaseConfig?.projectId;
-        // Priority 2: Environment variables
         const envProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
-        
         const finalProjectId = (configProjectId && configProjectId !== "TODO_PROJECT_ID") ? configProjectId : envProjectId;
         
         if (finalProjectId) {
@@ -139,7 +107,6 @@ const getDb = async () => {
       try {
         console.log(`[Firebase] Connecting to named database: ${dbId}`);
         db = getFirestore(serverApp, dbId);
-        // Test connection
         await db.collection("businesses").limit(1).get();
         console.log(`[Firebase] Connected to named database: ${dbId}`);
       } catch (err: any) {
@@ -156,270 +123,177 @@ const getDb = async () => {
       db = getFirestore(serverApp);
     }
     
-    // Final verification
     await db.collection("businesses").limit(1).get();
     console.log("[Firebase] Firestore connection verified");
     
     return db;
   } catch (err: any) {
     console.error("[Firebase] Critical Init Error:", err.message);
-    
-    let detailedError = `Firebase Initialization Failed: ${err.message}.`;
-    if (err.message?.includes("Could not load the default credentials")) {
-      detailedError += " \n\nINSTRUCTIONS FOR VERCEL: \n1. Go to Firebase Console > Project Settings > Service Accounts. \n2. Click 'Generate new private key'. \n3. Copy the JSON content. \n4. In Vercel, add an environment variable 'FIREBASE_SERVICE_ACCOUNT' and paste the JSON content as the value. \n5. Redeploy your app.";
-    }
-    
-    // Last ditch effort: default everything
-    try {
-      if (admin.apps.length === 0) {
-        admin.initializeApp();
-      }
-      db = getFirestore(admin.app());
-      await db.collection("businesses").limit(1).get();
-      return db;
-    } catch (lastErr: any) {
-      console.error("[Firebase] Last ditch effort failed:", lastErr.message);
-      throw new Error(`${detailedError} (Last ditch error: ${lastErr.message}). ProjectId: ${firebaseConfig?.projectId || 'none'}`);
-    }
+    throw err;
   }
 };
 
-// Global error handler
-app.use((err: any, req: any, res: any, next: any) => {
-  console.error("[Global Error]", err);
-  res.status(500).json({ error: err.message || "Internal Server Error" });
-});
-
-async function startServer() {
-  const PORT = 3000;
-
-  // Email Transporter
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_PASS,
-    },
-  });
-
-  // Notification Logic
-  const sendNotification = async ({ type, data, config, message: customMessage, subject: customSubject, toEmail, toPhone, toTelegram }: any) => {
-    const results: any = { email: null, telegram: null, whatsapp: null };
-    console.log(`[Notification] Attempting to send ${type} to ${toEmail || toPhone || toTelegram || 'unknown'}`);
+// Notification Logic
+const sendNotification = async ({ type, data, config, message: customMessage, subject: customSubject, toEmail, toPhone, toTelegram }: any) => {
+  const results: any = { email: null, telegram: null, whatsapp: null };
+  console.log(`[Notification] Attempting to send ${type} to ${toEmail || toPhone || toTelegram || 'unknown'}`);
+  
+  const message = customMessage || `
+    🔔 Fideliza Notification: ${type}
     
-    const message = customMessage || `
-      🔔 Fideliza Notification: ${type}
-      
-      Details:
-      ${JSON.stringify(data, null, 2)}
-    `;
+    Details:
+    ${JSON.stringify(data, null, 2)}
+  `;
 
-    const subject = customSubject || `Fideliza: ${type}`;
+  const subject = customSubject || `Fideliza: ${type}`;
 
-    // Email Notification
-    const emailTarget = toEmail || (type === "System" ? config.email : null);
-    if (emailTarget && emailTarget.trim() !== "") {
-      const gUser = config.gmailUser || process.env.GMAIL_USER;
-      const gPass = config.gmailAppPass || process.env.GMAIL_PASS;
+  // Email Notification
+  const emailTarget = toEmail || (type === "System" ? config.email : null);
+  if (emailTarget && emailTarget.trim() !== "") {
+    const gUser = config.gmailUser || process.env.GMAIL_USER;
+    const gPass = config.gmailAppPass || process.env.GMAIL_PASS;
 
-      if (gUser && gPass) {
-        try {
-          console.log(`[Notification] Sending Email to ${emailTarget} using ${gUser}`);
-          
-          // Create a temporary transporter if using custom credentials
-          const currentTransporter = (config.gmailUser && config.gmailAppPass) 
-            ? nodemailer.createTransport({ service: 'gmail', auth: { user: gUser, pass: gPass } })
-            : transporter;
+    if (gUser && gPass) {
+      try {
+        console.log(`[Notification] Sending Email to ${emailTarget} using ${gUser}`);
+        const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: { user: gUser, pass: gPass },
+        });
 
-          await currentTransporter.sendMail({
-            from: gUser,
-            to: emailTarget,
-            subject: subject,
-            text: message,
-          });
-          results.email = { success: true };
-        } catch (err: any) {
-          console.error("[Notification] Email Error:", err);
-          results.email = { success: false, error: err.message };
-        }
-      } else {
-        console.warn("[Notification] Gmail credentials not set, skipping email");
-        results.email = { success: false, error: "Email credentials not configured" };
+        await transporter.sendMail({
+          from: gUser,
+          to: emailTarget,
+          subject: subject,
+          text: message,
+        });
+        results.email = { success: true };
+        console.log(`[Notification] Email sent successfully to ${emailTarget}`);
+      } catch (err: any) {
+        console.error("[Notification] Email Error:", err);
+        results.email = { success: false, error: err.message };
       }
+    } else {
+      console.warn("[Notification] Gmail credentials not set, skipping email");
+      results.email = { success: false, error: "Email credentials not configured" };
     }
+  }
 
-    // Telegram Notification
-    // config.telegram is a boolean indicating if it's enabled for the business
-    if (config.telegram || toTelegram) {
-      const token = config.telegramToken || process.env.TELEGRAM_BOT_TOKEN;
-      const chatId = toTelegram || config.telegramChatId || process.env.TELEGRAM_CHAT_ID;
-      
-      if (token && chatId) {
-        try {
-          console.log(`[Notification] Sending Telegram to ${chatId}`);
-          const tBot = new TelegramBot(token, { polling: false });
-          await tBot.sendMessage(chatId, message);
-          results.telegram = { success: true };
-        } catch (err: any) {
-          console.error("[Notification] Telegram Error:", err);
-          results.telegram = { success: false, error: err.message };
-        }
-      } else {
-        console.warn("[Notification] Telegram token or chatId not set, skipping telegram");
-        results.telegram = { success: false, error: "Telegram credentials not configured" };
-      }
-    }
-
-    // WhatsApp Notification (CallMeBot)
-    if (config.whatsapp || toPhone) {
-      const phone = toPhone || config.whatsappPhone;
-      const apiKey = config.whatsappApiKey;
-      
-      if (phone && phone.trim() !== "" && apiKey && apiKey.trim() !== "") {
-        try {
-          // CallMeBot expects phone number in international format without the '+' sign
-          const cleanPhone = phone.replace(/\+/g, '');
-          console.log(`[Notification] Sending WhatsApp to ${cleanPhone}`);
-          const url = `https://api.callmebot.com/whatsapp.php?phone=${cleanPhone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
-          const response = await fetch(url);
-          if (response.ok) {
-            results.whatsapp = { success: true };
-          } else {
-            const text = await response.text();
-            results.whatsapp = { success: false, error: `CallMeBot returned ${response.status}: ${text}` };
-          }
-        } catch (err: any) {
-          console.error("[Notification] WhatsApp Error:", err);
-          results.whatsapp = { success: false, error: err.message };
-        }
-      } else if (config.whatsapp) {
-        console.warn("[Notification] WhatsApp phone or apiKey not set, skipping whatsapp");
-        results.whatsapp = { success: false, error: "WhatsApp credentials not configured" };
-      }
-    }
-
-    return results;
-  };
-
-  // Helper for Firestore error diagnostics
-  const handleFirestoreError = (error: any, operationType: string, path: string | null) => {
-    const errInfo = {
-      error: error.message || String(error),
-      code: error.code,
-      operationType,
-      path,
-      projectId: firebaseConfig.projectId || "unknown",
-      databaseId: firebaseConfig.firestoreDatabaseId,
-      envProject: process.env.GOOGLE_CLOUD_PROJECT
-    };
-    console.error(`[Firestore Error] ${JSON.stringify(errInfo, null, 2)}`);
-    return error;
-  };
-
-  // API Routes
-  app.get("/api/test-db", async (req, res) => {
-    const path = "businesses";
-    try {
-      const firestore = await getDb();
-      if (!firestore) throw new Error("Firestore not initialized");
-      const snapshot = await firestore.collection(path).limit(1).get();
-      res.json({ 
-        success: true, 
-        message: "Firestore connection successful", 
-        count: snapshot.docs.length,
-        projectId: firebaseConfig.projectId
-      });
-    } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  app.post("/api/notify", async (req, res) => {
-    try {
-      const results = await sendNotification(req.body);
-      res.json({ success: true, results });
-    } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  // Manual trigger for reminders
-  app.post("/api/process-reminders", async (req, res) => {
-    try {
-      console.log("[API] Manual reminder check triggered");
-      await checkReminders();
-      res.json({ success: true, message: "Reminder check completed" });
-    } catch (error: any) {
-      console.error("[API] Manual reminder check failed:", error);
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  // Simple Scheduler for Reminders
-  let isChecking = false;
-  const checkReminders = async () => {
-    if (isChecking) return;
-    isChecking = true;
+  // Telegram Notification
+  if (config.telegram || toTelegram) {
+    const token = config.telegramToken || process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = toTelegram || config.telegramChatId || process.env.TELEGRAM_CHAT_ID;
     
+    if (token && chatId) {
+      try {
+        console.log(`[Notification] Sending Telegram to ${chatId}`);
+        const tBot = new TelegramBot(token, { polling: false });
+        await tBot.sendMessage(chatId, message);
+        results.telegram = { success: true };
+        console.log(`[Notification] Telegram sent successfully to ${chatId}`);
+      } catch (err: any) {
+        console.error("[Notification] Telegram Error:", err);
+        results.telegram = { success: false, error: err.message };
+      }
+    } else {
+      console.warn("[Notification] Telegram token or chatId not set, skipping telegram");
+      results.telegram = { success: false, error: "Telegram credentials not configured" };
+    }
+  }
+
+  // WhatsApp Notification (CallMeBot)
+  if (config.whatsapp || toPhone) {
+    const phone = toPhone || config.whatsappPhone;
+    const apiKey = config.whatsappApiKey;
+    
+    if (phone && phone.trim() !== "" && apiKey && apiKey.trim() !== "") {
+      try {
+        const cleanPhone = phone.replace(/\+/g, '');
+        console.log(`[Notification] Sending WhatsApp to ${cleanPhone}`);
+        const url = `https://api.callmebot.com/whatsapp.php?phone=${cleanPhone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          results.whatsapp = { success: true };
+          console.log(`[Notification] WhatsApp sent successfully to ${cleanPhone}`);
+        } else {
+          const text = await response.text();
+          results.whatsapp = { success: false, error: `CallMeBot returned ${response.status}: ${text}` };
+        }
+      } catch (err: any) {
+        console.error("[Notification] WhatsApp Error:", err);
+        results.whatsapp = { success: false, error: err.message };
+      }
+    } else if (config.whatsapp) {
+      console.warn("[Notification] WhatsApp phone or apiKey not set, skipping whatsapp");
+      results.whatsapp = { success: false, error: "WhatsApp credentials not configured" };
+    }
+  }
+
+  return results;
+};
+
+// Simple Scheduler for Reminders
+let isChecking = false;
+const checkReminders = async () => {
+  if (isChecking) return;
+  isChecking = true;
+  
+  try {
     const firestore = await getDb();
     if (!firestore) {
       console.warn("[Scheduler] Firestore not initialized yet, skipping check");
-      isChecking = false;
       return;
     }
     const now = new Date().toISOString();
-    try {
-      console.log(`[Scheduler] Checking pending reminders at ${now}...`);
-      
-      const businessesSnapshot = await firestore.collection("businesses").get();
-      if (businessesSnapshot.empty) {
-        console.log("[Scheduler] No businesses found in database.");
-        return;
-      }
-      
-      let processedCount = 0;
-      for (const bizDoc of businessesSnapshot.docs) {
-        const business = bizDoc.data();
-        const remindersSnapshot = await bizDoc.ref.collection("reminders")
-          .where("status", "==", "pending")
-          .get();
+    console.log(`[Scheduler] Checking pending reminders at ${now}...`);
+    
+    const businessesSnapshot = await firestore.collection("businesses").get();
+    if (businessesSnapshot.empty) {
+      console.log("[Scheduler] No businesses found in database.");
+      return;
+    }
+    
+    let processedCount = 0;
+    for (const bizDoc of businessesSnapshot.docs) {
+      const business = bizDoc.data();
+      const remindersSnapshot = await bizDoc.ref.collection("reminders")
+        .where("status", "==", "pending")
+        .get();
 
-        if (remindersSnapshot.empty) continue;
+      if (remindersSnapshot.empty) continue;
 
-        for (const doc of remindersSnapshot.docs) {
-          const reminder = doc.data();
-          
-          // Ensure we have a valid scheduledAt
-          if (!reminder.scheduledAt) {
-            console.warn(`[Scheduler] Reminder ${doc.id} has no scheduledAt, skipping.`);
-            continue;
-          }
+      for (const doc of remindersSnapshot.docs) {
+        const reminder = doc.data();
+        
+        if (!reminder.scheduledAt) {
+          console.warn(`[Scheduler] Reminder ${doc.id} has no scheduledAt, skipping.`);
+          continue;
+        }
 
-          if (reminder.scheduledAt > now) {
-            console.log(`[Scheduler] Reminder ${doc.id} is for the future (${reminder.scheduledAt}). Business TZ: ${business.timezone || 'America/Caracas'}. Current UTC: ${now}`);
-            continue;
-          }
+        if (reminder.scheduledAt > now) {
+          console.log(`[Scheduler] Reminder ${doc.id} is for the future (${reminder.scheduledAt}). Business TZ: ${business.timezone || 'America/Caracas'}. Current UTC: ${now}`);
+          continue;
+        }
 
-          processedCount++;
-          console.log(`[Scheduler] Processing reminder ${doc.id} (Scheduled: ${reminder.scheduledAt})`);
+        processedCount++;
+        console.log(`[Scheduler] Processing reminder ${doc.id} (Scheduled: ${reminder.scheduledAt})`);
 
-          const config = {
-            email: business.ownerEmail,
-            telegram: !!business.telegramChatId,
-            telegramToken: business.telegramToken,
-            telegramChatId: business.telegramChatId,
-            whatsapp: !!business.whatsappEnabled,
-            whatsappPhone: business.whatsappPhone,
-            whatsappApiKey: business.whatsappApiKey,
-            gmailUser: business.gmailUser,
-            gmailAppPass: business.gmailAppPass,
-          };
+        const config = {
+          email: business.ownerEmail,
+          telegram: !!business.telegramChatId,
+          telegramToken: business.telegramToken,
+          telegramChatId: business.telegramChatId,
+          whatsapp: !!business.whatsappEnabled,
+          whatsappPhone: business.whatsappPhone,
+          whatsappApiKey: business.whatsappApiKey,
+          gmailUser: business.gmailUser,
+          gmailAppPass: business.gmailAppPass,
+        };
 
         try {
           let anySuccess = false;
           let errors: string[] = [];
 
-          // If reminder has specific customers, send to them
           if (reminder.customerIds && reminder.customerIds.length > 0) {
             console.log(`[Scheduler] Sending reminder ${doc.id} to ${reminder.customerIds.length} customers`);
             for (const customerId of reminder.customerIds) {
@@ -445,7 +319,6 @@ async function startServer() {
             }
           } else {
             console.log(`[Scheduler] Sending reminder ${doc.id} to business owner`);
-            // Send to business owner if no specific customers
             const results = await sendNotification({
               type: reminder.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
               message: reminder.message,
@@ -460,7 +333,6 @@ async function startServer() {
             });
           }
 
-          // Update status
           const statusMessage = errors.length > 0 ? [...new Set(errors)].join(", ") : undefined;
           if (anySuccess) {
             await doc.ref.update({ 
@@ -489,13 +361,79 @@ async function startServer() {
     }
   } catch (error: any) {
     console.error("[Scheduler] Error in interval:", error);
-    if (error.message?.includes("PERMISSION_DENIED")) {
-      console.error("[Scheduler] CRITICAL: Permission Denied. Check if the Firebase project ID in firebase-applet-config.json matches the environment and if the service account has access.");
-    }
   } finally {
     isChecking = false;
   }
 };
+
+// Health check - Minimal and fast
+app.get("/api/health", async (req, res) => {
+  let dbStatus = "not_initialized";
+  let dbError = null;
+  try {
+    const firestore = await getDb();
+    dbStatus = firestore ? "connected" : "failed";
+    
+    // Trigger scheduler on health check to ensure it runs in serverless environments
+    if (firestore) {
+      checkReminders().catch(e => console.error("[HealthCheck] Scheduler trigger failed:", e));
+    }
+  } catch (e: any) {
+    dbStatus = "error";
+    dbError = e.message;
+  }
+
+  res.json({ 
+    status: "ok", 
+    timestamp: new Date().toISOString(),
+    projectId: firebaseConfig?.projectId || "unknown",
+    dbStatus,
+    dbError,
+    isVercel: !!process.env.VERCEL,
+    envProjectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "none"
+  });
+});
+
+// API Routes
+app.get("/api/test-db", async (req, res) => {
+  const path = "businesses";
+  try {
+    const firestore = await getDb();
+    if (!firestore) throw new Error("Firestore not initialized");
+    const snapshot = await firestore.collection(path).limit(1).get();
+    res.json({ 
+      success: true, 
+      message: "Firestore connection successful", 
+      count: snapshot.docs.length,
+      projectId: firebaseConfig.projectId
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/notify", async (req, res) => {
+  try {
+    const results = await sendNotification(req.body);
+    res.json({ success: true, results });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/process-reminders", async (req, res) => {
+  try {
+    console.log("[API] Manual reminder check triggered");
+    await checkReminders();
+    res.json({ success: true, message: "Reminder check completed" });
+  } catch (error: any) {
+    console.error("[API] Manual reminder check failed:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+async function startServer() {
+  const PORT = 3000;
 
   // Run once on startup and then every minute
   checkReminders();
