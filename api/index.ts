@@ -39,9 +39,17 @@ const getDb = async () => {
   if (db) return db;
   
   try {
-    console.log("[Firebase] Starting initialization...");
-    console.log("[Firebase] Config loaded:", !!firebaseConfig);
-    console.log("[Firebase] Config ProjectId:", firebaseConfig?.projectId);
+    const now = new Date().toISOString();
+    console.log(`[Firebase] [${now}] Starting initialization...`);
+    
+    const configProjectId = firebaseConfig?.projectId;
+    const envProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+    // Prefer envProjectId (the current project) over configProjectId (which might be stale from a remix)
+    const finalProjectId = envProjectId || (configProjectId && configProjectId !== "TODO_PROJECT_ID" ? configProjectId : null);
+    
+    console.log(`[Firebase] Config ProjectId: ${configProjectId}`);
+    console.log(`[Firebase] Env ProjectId: ${envProjectId}`);
+    console.log(`[Firebase] Final ProjectId to use: ${finalProjectId}`);
     
     let serverApp;
     if (admin.apps.length === 0) {
@@ -62,10 +70,6 @@ const getDb = async () => {
       }
 
       if (!serverApp) {
-        const configProjectId = firebaseConfig?.projectId;
-        const envProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
-        const finalProjectId = (configProjectId && configProjectId !== "TODO_PROJECT_ID") ? configProjectId : envProjectId;
-        
         if (finalProjectId) {
           try {
             console.log("[Firebase] Attempting initialization with projectId:", finalProjectId);
@@ -107,14 +111,22 @@ const getDb = async () => {
       try {
         console.log(`[Firebase] Connecting to named database: ${dbId}`);
         db = getFirestore(serverApp, dbId);
+        // Verify connection with a simple query
         await db.collection("businesses").limit(1).get();
-        console.log(`[Firebase] Connected to named database: ${dbId}`);
+        console.log(`[Firebase] Successfully connected to named database: ${dbId}`);
       } catch (err: any) {
-        console.warn(`[Firebase] Named database ${dbId} failed:`, err.message);
-        if (err.message?.includes("NOT_FOUND") || err.message?.includes("database not found") || err.code === 5) {
-          console.log("[Firebase] Falling back to (default) database...");
+        console.warn(`[Firebase] Named database ${dbId} connection failed:`, err.message);
+        
+        // Code 7 is PERMISSION_DENIED, Code 5 is NOT_FOUND
+        if (err.code === 5 || err.message?.includes("NOT_FOUND") || err.message?.includes("database not found")) {
+          console.log("[Firebase] Named database not found, falling back to (default)...");
+          db = getFirestore(serverApp);
+        } else if (err.code === 7 || err.message?.includes("PERMISSION_DENIED")) {
+          console.error(`[Firebase] PERMISSION_DENIED for named database ${dbId}. Check if the service account has access to this database.`);
+          console.log("[Firebase] Attempting fallback to (default) database due to permission error...");
           db = getFirestore(serverApp);
         } else {
+          console.error(`[Firebase] Unexpected error connecting to named database ${dbId}:`, err);
           throw err;
         }
       }
@@ -123,8 +135,17 @@ const getDb = async () => {
       db = getFirestore(serverApp);
     }
     
-    await db.collection("businesses").limit(1).get();
-    console.log("[Firebase] Firestore connection verified");
+    // Final verification of the chosen database
+    try {
+      await db.collection("businesses").limit(1).get();
+      console.log("[Firebase] Firestore connection verified");
+    } catch (err: any) {
+      console.error("[Firebase] CRITICAL: Firestore verification failed:", err.message);
+      if (err.code === 7) {
+        console.error("[Firebase] This is a PERMISSION_DENIED error. Ensure the service account has the 'Cloud Datastore User' role.");
+      }
+      throw err;
+    }
     
     return db;
   } catch (err: any) {
