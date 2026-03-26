@@ -1,69 +1,52 @@
 import dotenv from "dotenv";
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
-import fs from "fs";
 import cors from "cors";
 import nodemailer from "nodemailer";
 import TelegramBot from "node-telegram-bot-api";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
-dotenv.config();
+// Import config directly - this is the most reliable way for Vercel to bundle it
+import firebaseConfig from "../firebase-applet-config.json" with { type: "json" };
 
-// Load config safely
-let firebaseConfig: any = {};
-try {
-  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    console.log("[Config] Loaded firebase-applet-config.json successfully");
-  } else {
-    console.warn("[Config] firebase-applet-config.json NOT found at", configPath);
-  }
-} catch (err) {
-  console.error("[Config] Error loading firebase-applet-config.json:", err);
-}
+dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check at the VERY top
+// Health check - Minimal and fast
 app.get("/api/health", (req, res) => {
   res.json({ 
     status: "ok", 
     timestamp: new Date().toISOString(),
     projectId: firebaseConfig?.projectId || "unknown",
-    databaseId: firebaseConfig?.firestoreDatabaseId || "none",
-    isVercel: !!process.env.VERCEL,
-    nodeVersion: process.version,
-    env: process.env.NODE_ENV
+    isVercel: !!process.env.VERCEL
   });
 });
 
-// Initialize Firebase Admin
-let serverApp: admin.app.App | null = null;
+// Lazy Firebase Init Helper
 let db: admin.firestore.Firestore | null = null;
-
-if (firebaseConfig && firebaseConfig.projectId) {
+const getDb = () => {
+  if (db) return db;
+  if (!firebaseConfig.projectId) return null;
+  
   try {
+    let serverApp;
     if (admin.apps.length === 0) {
-      serverApp = admin.initializeApp({ 
-        projectId: firebaseConfig.projectId 
-      });
+      serverApp = admin.initializeApp({ projectId: firebaseConfig.projectId });
     } else {
       serverApp = admin.app();
     }
-    
-    if (serverApp) {
-      const dbId = firebaseConfig.firestoreDatabaseId;
-      db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
-    }
-  } catch (err: any) {
-    console.error("[Firebase] Init Error:", err);
+    const dbId = firebaseConfig.firestoreDatabaseId;
+    db = (dbId && dbId !== "(default)") ? getFirestore(serverApp, dbId) : getFirestore(serverApp);
+    return db;
+  } catch (err) {
+    console.error("[Firebase] Lazy Init Error:", err);
+    return null;
   }
-}
+};
 
 // Global error handler
 app.use((err: any, req: any, res: any, next: any) => {
@@ -187,7 +170,7 @@ async function startServer() {
       code: error.code,
       operationType,
       path,
-      projectId: serverApp?.options?.projectId || "unknown",
+      projectId: firebaseConfig.projectId || "unknown",
       databaseId: firebaseConfig.firestoreDatabaseId,
       envProject: process.env.GOOGLE_CLOUD_PROJECT
     };
@@ -199,28 +182,17 @@ async function startServer() {
   app.get("/api/test-db", async (req, res) => {
     const path = "businesses";
     try {
-      if (!db) throw new Error("Firestore not initialized");
-      console.log("[Test DB] Attempting to fetch businesses collection...");
-      const snapshot = await db.collection(path).limit(1).get();
+      const firestore = getDb();
+      if (!firestore) throw new Error("Firestore not initialized");
+      const snapshot = await firestore.collection(path).limit(1).get();
       res.json({ 
         success: true, 
         message: "Firestore connection successful", 
         count: snapshot.docs.length,
-        projectId: serverApp?.options?.projectId || "unknown",
-        databaseId: firebaseConfig.firestoreDatabaseId,
-        configProjectId: firebaseConfig.projectId,
-        appName: serverApp?.name || "none"
+        projectId: firebaseConfig.projectId
       });
     } catch (error: any) {
-      handleFirestoreError(error, "get", path);
-      res.status(500).json({ 
-        success: false, 
-        error: error.message,
-        projectId: serverApp?.options?.projectId || "unknown",
-        databaseId: firebaseConfig.firestoreDatabaseId,
-        configProjectId: firebaseConfig.projectId,
-        appName: serverApp?.name || "none"
-      });
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
@@ -235,48 +207,21 @@ async function startServer() {
 
   // Simple Scheduler for Reminders
   const checkReminders = async () => {
-    if (!db) {
-      console.warn("[Scheduler] Skipping check: Firestore not initialized");
-      return;
-    }
+    const firestore = getDb();
+    if (!firestore) return;
     const now = new Date().toISOString();
     try {
-      console.log(`[Scheduler] Checking for pending reminders at ${now}`);
-      
-      // Log current project/database context for debugging
-      console.log(`[Scheduler] Active Project: ${serverApp?.options?.projectId || "unknown"}`);
-      console.log(`[Scheduler] Target Database: ${firebaseConfig.firestoreDatabaseId}`);
-
-      // Query only by status to avoid needing a composite index on collectionGroup
-      const path = "reminders (collectionGroup)";
-      let remindersSnapshot;
-      try {
-        remindersSnapshot = await db.collectionGroup("reminders")
-          .where("status", "==", "pending")
-          .get();
-      } catch (err) {
-        throw handleFirestoreError(err, "collectionGroupQuery", path);
-      }
-
-      console.log(`[Scheduler] Found ${remindersSnapshot.docs.length} pending reminders total`);
+      const remindersSnapshot = await firestore.collectionGroup("reminders")
+        .where("status", "==", "pending")
+        .get();
 
       for (const doc of remindersSnapshot.docs) {
         const reminder = doc.data();
-        
-        // Filter by time in memory
-        if (reminder.scheduledAt > now) {
-          console.log(`[Scheduler] Reminder ${doc.id} is scheduled for ${reminder.scheduledAt}, skipping (now: ${now})`);
-          continue;
-        }
+        if (reminder.scheduledAt > now) continue;
 
-        console.log(`[Scheduler] Processing reminder ${doc.id} scheduled for ${reminder.scheduledAt}`);
-        const businessDoc = await db.collection("businesses").doc(reminder.businessId).get();
+        const businessDoc = await firestore.collection("businesses").doc(reminder.businessId).get();
         const business = businessDoc.data();
-
-        if (!business) {
-          console.log(`[Scheduler] Business ${reminder.businessId} not found for reminder ${doc.id}`);
-          continue;
-        }
+        if (!business) continue;
 
         const config = {
           email: business.ownerEmail,
@@ -298,7 +243,7 @@ async function startServer() {
           if (reminder.customerIds && reminder.customerIds.length > 0) {
             console.log(`[Scheduler] Sending reminder ${doc.id} to ${reminder.customerIds.length} customers`);
             for (const customerId of reminder.customerIds) {
-              const customerDoc = await db.collection("businesses").doc(reminder.businessId).collection("customers").doc(customerId).get();
+              const customerDoc = await firestore.collection("businesses").doc(reminder.businessId).collection("customers").doc(customerId).get();
               const customer = customerDoc.data();
               if (customer) {
                 const results = await sendNotification({
@@ -369,6 +314,7 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
