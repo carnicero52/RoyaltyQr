@@ -458,6 +458,36 @@ export default function AdminPanel() {
     }
   };
 
+  const handleClearHistory = async (type: "billing" | "marketing") => {
+    if (!business) return;
+    const confirmMessage = type === "billing" 
+      ? "¿Estás seguro de que deseas limpiar el historial de cobranzas? Esto eliminará todos los registros de ventas y recordatorios de pago."
+      : "¿Estás seguro de que deseas limpiar el historial de marketing? Esto eliminará todos los recordatorios y campañas de marketing.";
+    
+    if (!window.confirm(confirmMessage)) return;
+    
+    setSaving(true);
+    setStatus({ type: "warning", message: `Limpiando historial de ${type === "billing" ? "cobranzas" : "marketing"}...` });
+    try {
+      const response = await fetch(`/api/clear-history/${type}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ businessId: business.id }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setStatus({ type: "success", message: data.message });
+      } else {
+        setStatus({ type: "error", message: `Error: ${data.error}` });
+      }
+    } catch (error: any) {
+      console.error(`Error clearing ${type} history:`, error);
+      setStatus({ type: "error", message: "Error al conectar con el servidor." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleAddCustomer = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
@@ -1046,6 +1076,28 @@ export default function AdminPanel() {
                       >
                         <QrCode className="h-5 w-5" />
                         <span>Escanear / Ver QR</span>
+                      </button>
+                      
+                      <button 
+                        onClick={() => handleClearHistory("billing")}
+                        className={cn(
+                          "flex items-center space-x-3 p-4 rounded-2xl font-bold transition-all border",
+                          business?.darkModeEnabled ? "bg-slate-800 border-red-900/30 text-red-400 hover:bg-slate-700" : "bg-red-50 border-red-100 text-red-600 hover:bg-red-100"
+                        )}
+                      >
+                        <Trash2 className="h-5 w-5" />
+                        <span>Limpiar Historial Cobranzas</span>
+                      </button>
+                      
+                      <button 
+                        onClick={() => handleClearHistory("marketing")}
+                        className={cn(
+                          "flex items-center space-x-3 p-4 rounded-2xl font-bold transition-all border",
+                          business?.darkModeEnabled ? "bg-slate-800 border-red-900/30 text-red-400 hover:bg-slate-700" : "bg-red-50 border-red-100 text-red-600 hover:bg-red-100"
+                        )}
+                      >
+                        <Trash2 className="h-5 w-5" />
+                        <span>Limpiar Historial Marketing</span>
                       </button>
                       <button 
                         onClick={() => setActiveTab("customers")}
@@ -1711,6 +1763,55 @@ export default function AdminPanel() {
                       <p className={cn("text-xs", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Esto asegura que las notificaciones programadas se envíen a la hora correcta en tu ciudad.</p>
                     </div>
                   </div>
+
+                  {/* Maintenance Section */}
+                  <div className={cn(
+                    "mt-12 p-8 rounded-3xl border border-red-100 transition-colors duration-300",
+                    business?.darkModeEnabled ? "bg-slate-900/50 border-red-900/30" : "bg-red-50/30 border-red-100"
+                  )}>
+                    <h2 className={cn("text-xl font-bold mb-6 flex items-center space-x-2", business?.darkModeEnabled ? "text-red-400" : "text-red-600")}>
+                      <AlertCircle className="h-5 w-5" />
+                      <span>Mantenimiento y Pruebas</span>
+                    </h2>
+                    <p className={cn("text-sm mb-6", business?.darkModeEnabled ? "text-slate-400" : "text-gray-600")}>
+                      Utiliza estas opciones para limpiar datos de prueba o reorganizar tu historial. 
+                      <span className="font-bold block mt-1 text-red-500">¡Atención! Estas acciones son irreversibles.</span>
+                    </p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <button
+                        onClick={() => handleClearHistory("billing")}
+                        disabled={saving}
+                        className="flex items-center justify-center space-x-2 bg-white text-red-600 px-6 py-4 rounded-2xl font-bold hover:bg-red-50 transition-all border border-red-100 shadow-sm"
+                      >
+                        <Trash2 className="h-5 w-5" />
+                        <span>Limpiar Historial de Cobranzas</span>
+                      </button>
+                      
+                      <button
+                        onClick={() => handleClearHistory("marketing")}
+                        disabled={saving}
+                        className="flex items-center justify-center space-x-2 bg-white text-red-600 px-6 py-4 rounded-2xl font-bold hover:bg-red-50 transition-all border border-red-100 shadow-sm"
+                      >
+                        <Trash2 className="h-5 w-5" />
+                        <span>Limpiar Historial de Marketing</span>
+                      </button>
+                    </div>
+
+                    <div className="mt-6 pt-6 border-t border-red-100/50">
+                      <button
+                        onClick={handleTestConnection}
+                        disabled={saving}
+                        className={cn(
+                          "w-full flex items-center justify-center space-x-2 px-6 py-3 rounded-xl font-bold transition-all",
+                          business?.darkModeEnabled ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        )}
+                      >
+                        <RefreshCw className={cn("h-4 w-4", saving && "animate-spin")} />
+                        <span>Probar Conexión a Base de Datos</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -2204,21 +2305,32 @@ export default function AdminPanel() {
                     business?.darkModeEnabled ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100"
                   )}>
                     <h3 className={cn("font-bold mb-4", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Acciones Rápidas</h3>
-                    <button
-                      onClick={() => {
-                        setActiveTab("marketing");
-                        setReminderForm({
-                          ...reminderForm,
-                          type: "billing",
-                          subject: "Recordatorio de Pago Pendiente",
-                          message: "Hola, te recordamos que tienes un pago pendiente en nuestro negocio. ¡Gracias!"
-                        });
-                      }}
-                      className="w-full flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-sm"
-                    >
-                      <Bell className="h-4 w-4" />
-                      <span>Programar Recordatorio de Pago</span>
-                    </button>
+                    <div className="space-y-3">
+                      <button
+                        onClick={() => {
+                          setActiveTab("marketing");
+                          setReminderForm({
+                            ...reminderForm,
+                            type: "billing",
+                            subject: "Recordatorio de Pago Pendiente",
+                            message: "Hola, te recordamos que tienes un pago pendiente en nuestro negocio. ¡Gracias!"
+                          });
+                        }}
+                        className="w-full flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-sm"
+                      >
+                        <Bell className="h-4 w-4" />
+                        <span>Programar Recordatorio de Pago</span>
+                      </button>
+                      
+                      <button
+                        onClick={() => handleClearHistory("billing")}
+                        disabled={saving}
+                        className="w-full flex items-center justify-center space-x-2 bg-red-50 text-red-600 px-4 py-3 rounded-xl font-bold hover:bg-red-100 transition-all shadow-sm border border-red-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>Limpiar Historial de Cobranzas</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className={cn(
@@ -2270,6 +2382,14 @@ export default function AdminPanel() {
                   <h1 className={cn("text-3xl font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Marketing & Notificaciones</h1>
                   <p className={cn("mt-1", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Crea campañas y programa recordatorios para tus clientes.</p>
                 </div>
+                <button
+                  onClick={() => handleClearHistory("marketing")}
+                  disabled={saving}
+                  className="flex items-center space-x-2 bg-red-50 text-red-600 px-4 py-2 rounded-xl font-bold hover:bg-red-100 transition-all border border-red-100"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>Limpiar Historial Marketing</span>
+                </button>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
