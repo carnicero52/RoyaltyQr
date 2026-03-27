@@ -22,36 +22,8 @@ import { es } from "date-fns/locale";
 import { formatInTimeZone, toDate } from 'date-fns-tz';
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
-
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
-  constructor(props: any) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error: any) {
-    return { hasError: true, error };
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="p-8 text-center space-y-4">
-          <h1 className="text-2xl font-bold text-red-600">Algo salió mal</h1>
-          <p className="text-gray-600">Hubo un error inesperado. Por favor, recarga la página.</p>
-          <pre className="text-xs bg-gray-100 p-4 rounded-xl overflow-auto max-w-full text-left">
-            {this.state.error?.message || String(this.state.error)}
-          </pre>
-          <button 
-            onClick={() => window.location.reload()}
-            className="px-6 py-2 bg-orange-600 text-white rounded-xl font-bold"
-          >
-            Recargar
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
+import { handleFirestoreError, OperationType } from "../lib/firestore-errors";
+import ErrorBoundary from "../components/ErrorBoundary";
 
 export default function AdminPanel() {
   const { businessId } = useParams<{ businessId: string }>();
@@ -170,7 +142,7 @@ export default function AdminPanel() {
       setLoading(false);
     }, (err) => {
       console.error("Error loading business:", err);
-      handleFirestoreError(err, 'get', `businesses/${businessId}`);
+      handleFirestoreError(err, OperationType.GET, `businesses/${businessId}`);
       navigate("/dashboard");
     });
 
@@ -178,27 +150,27 @@ export default function AdminPanel() {
     const unsubCustomers = onSnapshot(collection(db, "businesses", businessId, "customers"), (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Customer));
       setCustomers(list);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${businessId}/customers`));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `businesses/${businessId}/customers`));
 
     // Real-time Purchases
     const qPurchases = query(collection(db, "businesses", businessId, "purchases"), orderBy("timestamp", "desc"));
     const unsubPurchases = onSnapshot(qPurchases, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Purchase));
       setPurchases(list);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${businessId}/purchases`));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `businesses/${businessId}/purchases`));
 
     // Real-time Reminders
     const qReminders = query(collection(db, "businesses", businessId, "reminders"), orderBy("scheduledAt", "desc"));
     const unsubReminders = onSnapshot(qReminders, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Reminder));
       setReminders(list);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${businessId}/reminders`));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `businesses/${businessId}/reminders`));
 
     // Real-time Staff
     const unsubStaff = onSnapshot(collection(db, "businesses", businessId, "staff"), (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Staff));
       setStaff(list);
-    }, (err) => handleFirestoreError(err, 'get', `businesses/${businessId}/staff`));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `businesses/${businessId}/staff`));
 
     return () => {
       unsubBusiness();
@@ -229,30 +201,6 @@ export default function AdminPanel() {
     }
   }, [status]);
 
-  const handleFirestoreError = (error: unknown, operationType: string, path: string | null) => {
-    const errInfo = {
-      error: error instanceof Error ? error.message : String(error),
-      authInfo: {
-        userId: auth.currentUser?.uid,
-        email: auth.currentUser?.email,
-        emailVerified: auth.currentUser?.emailVerified,
-        isAnonymous: auth.currentUser?.isAnonymous,
-        tenantId: auth.currentUser?.tenantId,
-        providerInfo: auth.currentUser?.providerData.map(provider => ({
-          providerId: provider.providerId,
-          displayName: provider.displayName,
-          email: provider.email,
-          photoUrl: provider.photoURL
-        })) || []
-      },
-      operationType,
-      path
-    };
-    console.error('Firestore Error: ', JSON.stringify(errInfo));
-    setStatus({ message: "Error de permisos o conexión con la base de datos.", type: 'error' });
-    throw new Error(JSON.stringify(errInfo));
-  };
-
   const handleScheduleReminder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!business) return;
@@ -273,7 +221,7 @@ export default function AdminPanel() {
       try {
         await addDoc(collection(db, "businesses", business.id, "reminders"), reminderData);
       } catch (err) {
-        handleFirestoreError(err, 'create', path);
+        handleFirestoreError(err, OperationType.CREATE, path);
       }
       setStatus({ message: "¡Recordatorio programado con éxito!", type: 'success' });
       setReminderForm({
@@ -426,7 +374,7 @@ export default function AdminPanel() {
       await updateDoc(doc(db, "businesses", business.id), { ...business });
       setStatus({ message: "¡Configuración guardada con éxito!", type: 'success' });
     } catch (err) {
-      handleFirestoreError(err, 'update', `businesses/${business.id}`);
+      handleFirestoreError(err, OperationType.UPDATE, `businesses/${business.id}`);
     } finally {
       setSaving(false);
     }
@@ -533,7 +481,7 @@ export default function AdminPanel() {
               couponsCount: increment(1) // Sello de regalo por referir
             });
           } catch (err) {
-            handleFirestoreError(err, 'update', `businesses/${business!.id}/customers/${referredBy}`);
+            handleFirestoreError(err, OperationType.UPDATE, `businesses/${business!.id}/customers/${referredBy}`);
           }
         }
       }
@@ -561,7 +509,7 @@ export default function AdminPanel() {
       setIsEditingCustomer(null);
       setStatus({ message: "Cliente actualizado con éxito", type: 'success' });
     } catch (err) {
-      handleFirestoreError(err, 'update', `businesses/${business!.id}/customers/${isEditingCustomer.id}`);
+      handleFirestoreError(err, OperationType.UPDATE, `businesses/${business!.id}/customers/${isEditingCustomer.id}`);
     }
   };
 
@@ -602,7 +550,7 @@ export default function AdminPanel() {
           level: newLevel
         });
       } catch (err) {
-        handleFirestoreError(err, 'update', `businesses/${business.id}/customers/${isAddingPurchase}`);
+        handleFirestoreError(err, OperationType.UPDATE, `businesses/${business.id}/customers/${isAddingPurchase}`);
       }
 
       // Record Purchase
@@ -617,7 +565,7 @@ export default function AdminPanel() {
           staffId: auth.currentUser?.uid
         });
       } catch (err) {
-        handleFirestoreError(err, 'create', `businesses/${business.id}/purchases`);
+        handleFirestoreError(err, OperationType.CREATE, `businesses/${business.id}/purchases`);
       }
 
       setIsAddingPurchase(null);
@@ -679,7 +627,7 @@ export default function AdminPanel() {
       await deleteDoc(doc(db, "businesses", business!.id, "customers", id));
       setStatus({ message: "Cliente eliminado con éxito", type: 'success' });
     } catch (err) {
-      handleFirestoreError(err, 'delete', `businesses/${business!.id}/customers/${id}`);
+      handleFirestoreError(err, OperationType.DELETE, `businesses/${business!.id}/customers/${id}`);
     }
   };
 
@@ -694,7 +642,7 @@ export default function AdminPanel() {
       setCustomerHistory(snap.docs.map(d => ({ id: d.id, ...d.data() } as Purchase)));
       setShowHistory(customerId);
     } catch (err) {
-      handleFirestoreError(err, 'get', `businesses/${business!.id}/purchases`);
+      handleFirestoreError(err, OperationType.GET, `businesses/${business!.id}/purchases`);
     }
   };
 
@@ -2727,7 +2675,7 @@ export default function AdminPanel() {
                           businessId: business.id
                         });
                       } catch (err) {
-                        handleFirestoreError(err, 'create', `businesses/${business.id}/staff`);
+                        handleFirestoreError(err, OperationType.CREATE, `businesses/${business.id}/staff`);
                       }
                     }
                   }}

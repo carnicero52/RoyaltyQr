@@ -1,110 +1,83 @@
 {
   "entities": {
-    "business": {
+    "Business": {
       "title": "Business",
-      "description": "Configuration and details for a business loyalty program.",
+      "description": "A business using the Fideliza platform.",
       "type": "object",
       "properties": {
-        "name": { "type": "string", "description": "Name of the business." },
-        "slogan": { "type": "string", "description": "Business slogan or catchphrase." },
-        "description": { "type": "string", "description": "Detailed description of the business." },
-        "rewardLongDescription": { "type": "string", "description": "Detailed description of the reward." },
-        "logoUrl": { "type": "string", "description": "URL to the business logo image." },
-        "rewardDescription": { "type": "string", "description": "Description of the reward (e.g., 'Free Coffee')." },
-        "rewardImageUrl": { "type": "string", "description": "URL to the reward image." },
-        "couponsNeeded": { "type": "integer", "description": "Number of coupons required for a reward." },
-        "cooldownHours": { "type": "integer", "description": "Minimum hours between purchases." },
-        "ownerEmail": { "type": "string", "description": "Email of the business owner." },
-        "ownerUid": { "type": "string", "description": "Firebase Auth UID of the business owner." },
+        "name": { "type": "string", "description": "The name of the business." },
+        "ownerEmail": { "type": "string", "format": "email", "description": "The email of the business owner." },
+        "ownerUid": { "type": "string", "description": "The UID of the business owner." },
+        "telegramToken": { "type": "string", "description": "Telegram bot token for notifications." },
         "telegramChatId": { "type": "string", "description": "Telegram chat ID for notifications." },
-        "telegramToken": { "type": "string", "description": "Telegram bot token." },
-        "gmailUser": { "type": "string", "description": "Gmail address for sending notifications." },
-        "gmailAppPass": { "type": "string", "description": "Gmail App Password." },
-        "notificationsEnabled": { "type": "boolean", "description": "Whether notifications are enabled." },
-        "currency": { "type": "string", "description": "Currency code (e.g., 'USD', 'ARS')." }
+        "whatsappEnabled": { "type": "boolean", "description": "Whether WhatsApp notifications are enabled." },
+        "whatsappPhone": { "type": "string", "description": "WhatsApp phone number." },
+        "whatsappApiKey": { "type": "string", "description": "WhatsApp API key (CallMeBot)." },
+        "gmailUser": { "type": "string", "description": "Gmail user for sending emails." },
+        "gmailAppPass": { "type": "string", "description": "Gmail app password for sending emails." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the business was created." }
       },
-      "required": ["name", "rewardDescription", "couponsNeeded", "cooldownHours"]
+      "required": ["name", "ownerEmail", "ownerUid"]
     },
-    "customer": {
+    "Customer": {
       "title": "Customer",
-      "description": "Information about a customer participating in the loyalty program.",
+      "description": "A customer of a business.",
       "type": "object",
       "properties": {
-        "phone": { "type": "string", "description": "Customer's phone number (unique identifier)." },
-        "name": { "type": "string", "description": "Customer's name." },
-        "email": { "type": "string", "description": "Customer's email (optional)." },
-        "notes": { "type": "string", "description": "Internal notes about the customer." },
-        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Customer status." },
-        "couponsCount": { "type": "integer", "description": "Current number of coupons accumulated." },
-        "totalSpent": { "type": "number", "description": "Total amount spent by the customer." },
-        "lastPurchaseAt": { "type": "string", "format": "date-time", "description": "Timestamp of the last purchase." },
-        "businessId": { "type": "string", "description": "ID of the business the customer belongs to." }
+        "name": { "type": "string", "description": "The name of the customer." },
+        "email": { "type": "string", "format": "email", "description": "The email of the customer." },
+        "phone": { "type": "string", "description": "The phone number of the customer." },
+        "points": { "type": "number", "description": "Loyalty points earned by the customer." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the customer was created." }
       },
-      "required": ["phone", "businessId"]
+      "required": ["name"]
     },
-    "purchase": {
-      "title": "Purchase",
-      "description": "A record of a single purchase by a customer.",
-      "type": "object",
-      "properties": {
-        "customerId": { "type": "string", "description": "ID of the customer who made the purchase." },
-        "businessId": { "type": "string", "description": "ID of the business where the purchase was made." },
-        "amount": { "type": "number", "description": "Amount of the purchase." },
-        "paymentMethod": { "type": "string", "description": "Method of payment (e.g., 'Cash', 'Card')." },
-        "notes": { "type": "string", "description": "Notes about the purchase." },
-        "timestamp": { "type": "string", "format": "date-time", "description": "When the purchase occurred." }
-      },
-      "required": ["customerId", "businessId", "timestamp"]
-    },
-    "staff": {
-      "title": "Staff",
-      "description": "A staff member of a business.",
-      "type": "object",
-      "properties": {
-        "email": { "type": "string", "description": "Email of the staff member." },
-        "name": { "type": "string", "description": "Name of the staff member." },
-        "role": { "type": "string", "enum": ["staff", "admin"], "description": "Role of the staff member." },
-        "businessId": { "type": "string", "description": "ID of the business the staff member belongs to." }
-      },
-      "required": ["email", "name", "role", "businessId"]
-    },
-    "reminder": {
+    "Reminder": {
       "title": "Reminder",
-      "description": "A scheduled notification for customers.",
+      "description": "A scheduled notification (marketing or billing).",
       "type": "object",
       "properties": {
-        "businessId": { "type": "string", "description": "ID of the business." },
-        "subject": { "type": "string", "description": "Subject of the notification." },
-        "message": { "type": "string", "description": "Message of the notification." },
-        "scheduledAt": { "type": "string", "format": "date-time", "description": "When the notification is scheduled to be sent." },
-        "customerIds": { "type": "array", "items": { "type": "string" }, "description": "IDs of the customers to notify." },
-        "status": { "type": "string", "enum": ["pending", "sent", "failed"], "description": "Current status of the reminder." },
-        "statusMessage": { "type": "string", "description": "Optional error or status message." },
-        "type": { "type": "string", "enum": ["marketing", "billing"], "description": "Type of reminder." }
+        "type": { "type": "string", "enum": ["marketing", "billing"], "description": "The type of reminder." },
+        "subject": { "type": "string", "description": "The subject of the notification." },
+        "message": { "type": "string", "description": "The message content." },
+        "scheduledAt": { "type": "string", "format": "date-time", "description": "When the reminder should be sent." },
+        "status": { "type": "string", "enum": ["pending", "sent", "failed"], "description": "The current status of the reminder." },
+        "statusMessage": { "type": "string", "description": "A message explaining the status (e.g., error details)." },
+        "customerIds": { "type": "array", "items": { "type": "string" }, "description": "The IDs of customers to notify." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the reminder was created." }
       },
-      "required": ["businessId", "subject", "message", "scheduledAt", "status", "type"]
+      "required": ["type", "subject", "message", "scheduledAt", "status"]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "A purchase record for a customer.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string", "description": "The ID of the customer." },
+        "amount": { "type": "number", "description": "The purchase amount." },
+        "pointsEarned": { "type": "number", "description": "Points earned from this purchase." },
+        "description": { "type": "string", "description": "Description of the purchase." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the purchase occurred." }
+      },
+      "required": ["customerId", "amount", "createdAt"]
     }
   },
   "firestore": {
     "/businesses/{businessId}": {
-      "schema": "business",
-      "description": "Business configuration."
+      "schema": "Business",
+      "description": "Root collection for businesses."
     },
     "/businesses/{businessId}/customers/{customerId}": {
-      "schema": "customer",
-      "description": "Customers for a specific business."
-    },
-    "/businesses/{businessId}/purchases/{purchaseId}": {
-      "schema": "purchase",
-      "description": "Purchase history for a specific business."
-    },
-    "/businesses/{businessId}/staff/{staffId}": {
-      "schema": "staff",
-      "description": "Staff members for a specific business."
+      "schema": "Customer",
+      "description": "Sub-collection for customers of a business."
     },
     "/businesses/{businessId}/reminders/{reminderId}": {
-      "schema": "reminder",
-      "description": "Scheduled reminders for a specific business."
+      "schema": "Reminder",
+      "description": "Sub-collection for reminders of a business."
+    },
+    "/businesses/{businessId}/purchases/{purchaseId}": {
+      "schema": "Purchase",
+      "description": "Sub-collection for purchases of a business."
     }
   }
 }

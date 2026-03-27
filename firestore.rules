@@ -1,158 +1,140 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     // ===============================================================
-    // Assumed Data Model (aligned with types.ts)
+    // Assumed Data Model
     // ===============================================================
     //
     // Collection: businesses
-    // Fields: name, slogan, description, rewardLongDescription, logoUrl, rewardDescription, 
-    //         rewardImageUrl, couponsNeeded, cooldownHours, ownerEmail, telegramChatId, 
-    //         telegramToken, notificationsEnabled, billingNotificationsEnabled, 
-    //         marketingNotificationsEnabled, whatsappEnabled, whatsappPhone, whatsappApiKey, 
-    //         gmailUser, gmailAppPass, currency, themeColor, darkModeEnabled, levels
+    // Document ID: businessId
+    // Fields:
+    //   - name: string (required)
+    //   - ownerEmail: string (required)
+    //   - ownerUid: string (required)
+    //   - telegramToken: string (optional)
+    //   - telegramChatId: string (optional)
+    //   - whatsappEnabled: bool (optional)
+    //   - whatsappPhone: string (optional)
+    //   - whatsappApiKey: string (optional)
+    //   - gmailUser: string (optional)
+    //   - gmailAppPass: string (optional)
+    //   - createdAt: string (optional)
     //
-    // Collection: businesses/{businessId}/customers
-    // Fields: phone, name, email, notes, status, couponsCount, totalSpent, lastPurchaseAt, 
-    //         businessId, level, referredBy, referralCount
+    // Sub-collection: customers
+    // Document ID: customerId
+    // Fields:
+    //   - name: string (required)
+    //   - email: string (optional)
+    //   - phone: string (optional)
+    //   - points: number (optional)
+    //   - createdAt: string (optional)
     //
-    // Collection: businesses/{businessId}/purchases
-    // Fields: customerId, businessId, amount, paymentMethod, notes, timestamp, staffId
+    // Sub-collection: reminders
+    // Document ID: reminderId
+    // Fields:
+    //   - type: string (required, enum: marketing, billing)
+    //   - subject: string (required)
+    //   - message: string (required)
+    //   - scheduledAt: string (required)
+    //   - status: string (required, enum: pending, sent, failed)
+    //   - statusMessage: string (optional)
+    //   - customerIds: list (optional)
+    //   - createdAt: string (optional)
     //
-    // Collection: businesses/{businessId}/staff
-    // Fields: email, name, role, businessId
-    //
-    // Collection: businesses/{businessId}/reminders
-    // Fields: businessId, customerId, customerIds, type, subject, message, scheduledAt, 
-    //         status, statusMessage
+    // Sub-collection: purchases
+    // Document ID: purchaseId
+    // Fields:
+    //   - customerId: string (required)
+    //   - amount: number (required)
+    //   - pointsEarned: number (optional)
+    //   - description: string (optional)
+    //   - createdAt: string (required)
     //
     // ===============================================================
 
     // ===============================================================
     // Helper Functions
     // ===============================================================
-
+    
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isEmailVerified() {
-      return request.auth.token.email_verified == true;
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
-        (request.auth.token.email == "marcorodolfo40@gmail.com" && isEmailVerified());
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "marcorodolfo40@gmail.com" && request.auth.token.email_verified == true));
     }
 
     function isBusinessOwner(businessId) {
-      return isAuthenticated() && 
-        (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid || 
-         get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerEmail == request.auth.token.email);
+      return isAuthenticated() && (resource == null || resource.data.ownerUid == request.auth.uid);
     }
-
-    function isAuthorized(businessId) {
-      return isAdmin() || isBusinessOwner(businessId);
-    }
-
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    function isValidDateString(dateStr) {
-      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
-    }
-
-    // ===============================================================
-    // Domain Validators (for write operations)
-    // ===============================================================
 
     function isValidBusiness(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.rewardDescription is string && data.rewardDescription.size() < 500 &&
-             data.couponsNeeded is number && data.couponsNeeded > 0 &&
-             data.cooldownHours is number && data.cooldownHours >= 0 &&
-             data.notificationsEnabled is bool &&
-             data.ownerUid is string && data.ownerUid == request.auth.uid;
+      return data.keys().hasAll(['name', 'ownerEmail', 'ownerUid']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.ownerEmail is string && data.ownerEmail.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.ownerUid == request.auth.uid;
     }
 
     function isValidCustomer(data) {
-      return data.phone is string && data.phone.size() > 0 && data.phone.size() < 20 &&
-             data.couponsCount is number && data.couponsCount >= 0 &&
-             data.businessId is string;
-    }
-
-    function isValidPurchase(data) {
-      return data.customerId is string &&
-             data.businessId is string &&
-             isValidDateString(data.timestamp);
-    }
-
-    function isValidStaff(data) {
-      return data.email is string && isValidEmail(data.email) &&
+      return data.keys().hasAll(['name']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.role in ['staff', 'admin'] &&
-             data.businessId is string;
+             (!('email' in data) || (data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"))) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 20)) &&
+             (!('points' in data) || (data.points is number));
     }
 
     function isValidReminder(data) {
-      return data.businessId is string &&
-             data.type in ['billing', 'marketing'] &&
+      return data.keys().hasAll(['type', 'subject', 'message', 'scheduledAt', 'status']) &&
+             data.type in ['marketing', 'billing'] &&
              data.subject is string && data.subject.size() > 0 && data.subject.size() < 200 &&
              data.message is string && data.message.size() > 0 && data.message.size() < 2000 &&
-             isValidDateString(data.scheduledAt) &&
+             data.scheduledAt is string &&
              data.status in ['pending', 'sent', 'failed'];
+    }
+
+    function isValidPurchase(data) {
+      return data.keys().hasAll(['customerId', 'amount', 'createdAt']) &&
+             data.customerId is string &&
+             data.amount is number &&
+             data.createdAt is string;
     }
 
     // ===============================================================
     // Rules
     // ===============================================================
 
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
     match /businesses/{businessId} {
-      // Create: user must be authenticated
+      allow read: if isBusinessOwner(businessId) || isAdmin();
       allow create: if isAuthenticated() && isValidBusiness(request.resource.data);
-      
-      // Read: owner, admin, or public (for PublicPanel)
-      allow get: if true; 
-      allow list: if isAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
-      
-      // Update: owner or admin. Protect ownerUid.
-      allow update: if isAuthorized(businessId) && isValidBusiness(request.resource.data) &&
-                      (isAdmin() || request.resource.data.ownerUid == resource.data.ownerUid);
-      
-      // Delete: owner or admin
-      allow delete: if isAuthorized(businessId);
+      allow update: if isBusinessOwner(businessId) && isValidBusiness(request.resource.data);
+      allow delete: if isBusinessOwner(businessId) || isAdmin();
 
       match /customers/{customerId} {
-        // Public read for identification in PublicPanel
-        allow get: if true;
-        allow list: if isAuthorized(businessId);
-        
-        // Public update for stamps in PublicPanel
-        allow update: if (isAuthorized(businessId) && isValidCustomer(request.resource.data)) || 
-                        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['couponsCount', 'lastPurchaseAt']) &&
-                         request.resource.data.couponsCount == resource.data.couponsCount + 1);
-        
-        allow create: if isAuthorized(businessId) && isValidCustomer(request.resource.data);
-        allow delete: if isAuthorized(businessId);
-      }
-
-      match /purchases/{purchaseId} {
-        allow read: if isAuthorized(businessId);
-        // Public create for PublicPanel
-        allow create: if true; 
-        allow update, delete: if isAuthorized(businessId);
-      }
-
-      match /staff/{staffId} {
-        allow read: if isAuthorized(businessId);
-        allow write: if isAuthorized(businessId) && (request.method == 'delete' || isValidStaff(request.resource.data));
+        allow read, write: if isBusinessOwner(businessId) || isAdmin();
+        allow create: if isBusinessOwner(businessId) && isValidCustomer(request.resource.data);
+        allow update: if isBusinessOwner(businessId) && isValidCustomer(request.resource.data);
       }
 
       match /reminders/{reminderId} {
-        allow read: if isAuthorized(businessId);
-        allow write: if isAuthorized(businessId) && (request.method == 'delete' || isValidReminder(request.resource.data));
+        allow read, write: if isBusinessOwner(businessId) || isAdmin();
+        allow create: if isBusinessOwner(businessId) && isValidReminder(request.resource.data);
+        allow update: if isBusinessOwner(businessId) && isValidReminder(request.resource.data);
+      }
+
+      match /purchases/{purchaseId} {
+        allow read, write: if isBusinessOwner(businessId) || isAdmin();
+        allow create: if isBusinessOwner(businessId) && isValidPurchase(request.resource.data);
+        allow update: if isBusinessOwner(businessId) && isValidPurchase(request.resource.data);
       }
     }
 

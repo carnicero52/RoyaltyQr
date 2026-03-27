@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Store, ChevronRight, LogOut, Settings, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 interface Business {
   id: string;
@@ -42,6 +43,7 @@ const Dashboard: React.FC = () => {
         setBusinesses(list);
       } catch (error) {
         console.error('Error fetching businesses:', error);
+        handleFirestoreError(error, OperationType.LIST, 'businesses');
       } finally {
         setLoading(false);
       }
@@ -75,6 +77,7 @@ const Dashboard: React.FC = () => {
       navigate(`/admin/${docRef.id}`);
     } catch (error) {
       console.error('Error creating business:', error);
+      handleFirestoreError(error, OperationType.CREATE, 'businesses');
     } finally {
       setCreating(false);
     }

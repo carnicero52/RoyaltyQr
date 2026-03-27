@@ -8,6 +8,7 @@ import { formatDistanceToNow, differenceInHours } from "date-fns";
 import { es } from "date-fns/locale";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
+import { handleFirestoreError, OperationType } from "../lib/firestore-errors";
 
 export default function PublicPanel() {
   const { businessId } = useParams<{ businessId: string }>();
@@ -45,6 +46,7 @@ export default function PublicPanel() {
       }
     } catch (err) {
       console.error("Error fetching business:", err);
+      handleFirestoreError(err, OperationType.GET, `businesses/${businessId}`);
     } finally {
       setLoading(false);
     }
@@ -94,13 +96,15 @@ export default function PublicPanel() {
 
       // Register Purchase
       const now = new Date().toISOString();
+      const path = `businesses/${businessId}/customers/${phone}`;
       await updateDoc(customerRef, {
         couponsCount: increment(1),
         lastPurchaseAt: now,
       });
 
       // Add to Purchase History
-      await addDoc(collection(db, "businesses", businessId!, "purchases"), {
+      const purchasePath = `businesses/${businessId}/purchases`;
+      await addDoc(collection(db, businessId!, "purchases"), {
         customerId: phone,
         businessId: businessId!,
         timestamp: now,
@@ -122,7 +126,7 @@ export default function PublicPanel() {
 
     } catch (err) {
       console.error("Error registering purchase:", err);
-      setMessage({ type: "error", text: "Algo salió mal. Por favor, inténtalo de nuevo." });
+      handleFirestoreError(err, OperationType.WRITE, `businesses/${businessId}`);
     } finally {
       setRegistering(false);
     }

@@ -36,117 +36,90 @@ const getDb = async () => {
   try {
     const firebaseConfig = getFirebaseConfig();
     const configProjectId = firebaseConfig?.projectId;
-    const envProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || process.env.PROJECT_ID;
-    
-    let firebaseConfigProjectId: string | undefined;
-    if (process.env.FIREBASE_CONFIG) {
-      try {
-        const parsed = JSON.parse(process.env.FIREBASE_CONFIG);
-        firebaseConfigProjectId = parsed.projectId;
-      } catch (e) {}
-    }
-
     const dbId = firebaseConfig?.firestoreDatabaseId;
+    
+    // Log environment info for debugging
+    const envProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || process.env.PROJECT_ID;
+    console.log(`[Firebase] Init Context: ConfigProj=${configProjectId}, EnvProj=${envProjectId}, DBID=${dbId}`);
 
-    console.log(`[Firebase] Config ProjectId: ${configProjectId}`);
-    console.log(`[Firebase] Env ProjectId: ${envProjectId}`);
-    console.log(`[Firebase] Firebase Config ProjectId: ${firebaseConfigProjectId}`);
-    console.log(`[Firebase] Target Database: ${dbId}`);
-    console.log(`[Firebase] All Env Keys: ${Object.keys(process.env).filter(k => k.includes("PROJECT") || k.includes("FIREBASE") || k.includes("GOOGLE")).join(", ")}`);
-    if (process.env.FIREBASE_CONFIG) {
-      console.log(`[Firebase] FIREBASE_CONFIG: ${process.env.FIREBASE_CONFIG}`);
-    }
-
-    // Define connection strategies to try in order
-    const strategies = [
-      { 
-        name: "Config Project + Named DB", 
-        projectId: configProjectId, 
-        databaseId: dbId 
-      },
-      { 
-        name: "Config Project + Default DB", 
-        projectId: configProjectId, 
-        databaseId: "(default)" 
-      },
-      { 
-        name: "Firebase Config Project + Named DB", 
-        projectId: firebaseConfigProjectId, 
-        databaseId: dbId 
-      },
-      { 
-        name: "Firebase Config Project + Default DB", 
-        projectId: firebaseConfigProjectId, 
-        databaseId: "(default)" 
-      },
-      { 
-        name: "Env Project + Named DB", 
-        projectId: envProjectId, 
-        databaseId: dbId 
-      },
-      { 
-        name: "Env Project + Default DB", 
-        projectId: envProjectId, 
-        databaseId: "(default)" 
-      },
-      { 
-        name: "Default Admin Init", 
-        projectId: undefined, 
-        databaseId: undefined 
-      }
-    ];
-
-    for (const strategy of strategies) {
+    // Try to initialize with default credentials first (most reliable in Cloud Run)
+    if (admin.apps.length === 0) {
       try {
-        // Skip strategies with missing or placeholder project IDs
-        if (!strategy.projectId && strategy.name !== "Default Admin Init") continue;
-        if (strategy.projectId === "TODO_PROJECT_ID" || strategy.projectId === "") continue;
-
-        console.log(`[Firebase] Attempting strategy: ${strategy.name}...`);
-
-        // Re-initialize admin app if project ID changes
-        let serverApp;
-        if (admin.apps.length > 0) {
-          const currentApp = admin.app();
-          if (strategy.projectId && currentApp.options.projectId !== strategy.projectId) {
-            await currentApp.delete();
-            serverApp = admin.initializeApp({ 
-              projectId: strategy.projectId,
-              storageBucket: firebaseConfig?.storageBucket
-            });
-          } else {
-            serverApp = currentApp;
-          }
-        } else {
-          serverApp = admin.initializeApp(strategy.projectId ? { 
-            projectId: strategy.projectId,
-            storageBucket: firebaseConfig?.storageBucket
-          } : undefined);
+        console.log("[Firebase] Initializing with default credentials...");
+        admin.initializeApp();
+      } catch (e: any) {
+        console.warn(`[Firebase] Default initialization failed: ${e.message}. Trying explicit initialization.`);
+        
+        let firebaseConfigProjectId: string | undefined;
+        if (process.env.FIREBASE_CONFIG) {
+          try {
+            const parsed = JSON.parse(process.env.FIREBASE_CONFIG);
+            firebaseConfigProjectId = parsed.projectId;
+          } catch (e) {}
         }
 
-        const currentProjectId = serverApp.options.projectId || envProjectId;
-        const firestore = strategy.databaseId && strategy.databaseId !== "(default)" 
-          ? getFirestore(serverApp, strategy.databaseId) 
-          : getFirestore(serverApp);
-        
-        // Verify connection with a lightweight query
-        await firestore.collection("businesses").limit(1).get();
-        
-        db = firestore;
-        console.log(`[Firebase] SUCCESS: Connected via ${strategy.name} (Project: ${currentProjectId})`);
-        return db;
-      } catch (e: any) {
-        console.warn(`[Firebase] Strategy ${strategy.name} failed: ${e.message}`);
-        // Continue to next strategy
+        admin.initializeApp({
+          projectId: configProjectId || firebaseConfigProjectId || envProjectId,
+          storageBucket: firebaseConfig?.storageBucket
+        });
       }
     }
 
-    // If we reach here, all strategies failed
-    console.error("[Firebase] ALL CONNECTION STRATEGIES FAILED.");
-    console.error("[Firebase] This usually happens if the project was remixed and Firebase hasn't been set up for the new project.");
-    console.error("[Firebase] ACTION REQUIRED: Please use the 'Set up Firebase' tool in the AI Studio interface.");
-    
-    throw new Error("Could not connect to any Firestore instance.");
+    const serverApp = admin.app();
+    const activeProjectId = serverApp.options.projectId || envProjectId;
+    console.log(`[Firebase] Active Project ID: ${activeProjectId}`);
+
+    // Strategy 1: Try named database from config
+    if (dbId && dbId !== "(default)") {
+      try {
+        console.log(`[Firebase] Strategy 1: Named database ${dbId} in project ${activeProjectId}`);
+        const firestore = getFirestore(serverApp, dbId);
+        // Verify connection
+        await firestore.collection("businesses").limit(1).get();
+        db = firestore;
+        console.log(`[Firebase] SUCCESS: Connected to named database ${dbId}`);
+        return db;
+      } catch (e: any) {
+        console.warn(`[Firebase] Strategy 1 failed: ${e.message}`);
+      }
+    }
+
+    // Strategy 2: Try default database
+    try {
+      console.log(`[Firebase] Strategy 2: Default database in project ${activeProjectId}`);
+      const firestore = getFirestore(serverApp);
+      // Verify connection
+      await firestore.collection("businesses").limit(1).get();
+      db = firestore;
+      console.log(`[Firebase] SUCCESS: Connected to default database`);
+      return db;
+    } catch (e: any) {
+      console.warn(`[Firebase] Strategy 2 failed: ${e.message}`);
+    }
+
+    // Strategy 3: Try explicit config project ID if different
+    if (configProjectId && configProjectId !== activeProjectId) {
+      try {
+        console.log(`[Firebase] Strategy 3: Explicit config Project ID ${configProjectId}`);
+        const configApp = admin.initializeApp({ 
+          projectId: configProjectId,
+          storageBucket: firebaseConfig?.storageBucket
+        }, "config-app");
+        
+        const firestore = dbId && dbId !== "(default)" 
+          ? getFirestore(configApp, dbId) 
+          : getFirestore(configApp);
+          
+        await firestore.collection("businesses").limit(1).get();
+        db = firestore;
+        console.log(`[Firebase] SUCCESS: Connected via explicit config Project ID ${configProjectId}`);
+        return db;
+      } catch (e: any) {
+        console.warn(`[Firebase] Strategy 3 failed: ${e.message}`);
+      }
+    }
+
+    throw new Error("Could not connect to any Firestore instance. Please ensure Firebase is set up correctly in the AI Studio interface.");
   } catch (err: any) {
     console.error("[Firebase] Critical Init Error:", err.message);
     throw err;
@@ -426,11 +399,12 @@ app.get("/api/health", async (req, res) => {
   res.json({ 
     status: "ok", 
     timestamp: new Date().toISOString(),
-    projectId: getFirebaseConfig()?.projectId || "unknown",
+    configProjectId: getFirebaseConfig()?.projectId || "unknown",
     dbStatus,
     dbError,
-    isVercel: !!process.env.VERCEL,
-    envProjectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "none"
+    envProjectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || "none",
+    activeProjectId: admin.apps.length > 0 ? admin.app().options.projectId : "none",
+    dbId: getFirebaseConfig()?.firestoreDatabaseId || "default"
   });
 });
 
