@@ -1,5 +1,5 @@
 {
-  "name": "Fideliza - Lealtad y Recompensas",
-  "description": "Una plataforma integral de lealtad y recompensas para que los negocios gestionen cupones digitales y premios para clientes.",
+  "name": "Firebase Client SDK Refactor",
+  "description": "An application refactored to use the Firebase Client SDK for all Firestore operations, resolving Admin SDK permission issues.",
   "requestFramePermissions": []
 }
