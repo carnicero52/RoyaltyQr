@@ -457,9 +457,9 @@ export default function AdminPanel() {
       const newCust: Customer = {
         id: customerId,
         phone: phone || "Sin teléfono",
-        name,
-        email,
-        notes,
+        name: name || "Cliente",
+        email: email || "",
+        notes: notes || "",
         status: 'active',
         couponsCount: 0,
         totalSpent: 0,
@@ -488,8 +488,9 @@ export default function AdminPanel() {
 
       setSearchTerm("");
       setIsAddingCustomer(false);
+      setStatus({ message: "Cliente añadido con éxito", type: 'success' });
     } catch (err) {
-      console.error("Error adding customer:", err);
+      handleFirestoreError(err, OperationType.CREATE, `businesses/${business!.id}/customers/${customerId}`);
     }
   };
 
@@ -504,7 +505,14 @@ export default function AdminPanel() {
     const couponsCount = parseInt(formData.get("couponsCount") as string);
 
     try {
-      const updated = { ...isEditingCustomer, name, email, notes, status, couponsCount };
+      const updated = { 
+        ...isEditingCustomer, 
+        name: name || "Cliente", 
+        email: email || "", 
+        notes: notes || "", 
+        status, 
+        couponsCount 
+      };
       await updateDoc(doc(db, "businesses", business!.id, "customers", isEditingCustomer.id), updated);
       setIsEditingCustomer(null);
       setStatus({ message: "Cliente actualizado con éxito", type: 'success' });

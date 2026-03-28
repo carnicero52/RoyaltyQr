@@ -27,10 +27,18 @@
         "name": { "type": "string", "description": "The name of the customer." },
         "email": { "type": "string", "format": "email", "description": "The email of the customer." },
         "phone": { "type": "string", "description": "The phone number of the customer." },
-        "points": { "type": "number", "description": "Loyalty points earned by the customer." },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Customer status." },
+        "couponsCount": { "type": "number", "description": "Number of coupons/stamps collected." },
+        "totalSpent": { "type": "number", "description": "Total amount spent by the customer." },
+        "businessId": { "type": "string", "description": "The ID of the business this customer belongs to." },
+        "level": { "type": "string", "enum": ["bronze", "silver", "gold"], "description": "Customer loyalty level." },
+        "referredBy": { "type": "string", "description": "ID of the customer who referred this person." },
+        "referralCount": { "type": "number", "description": "Number of people referred by this customer." },
+        "lastPurchaseAt": { "type": "string", "format": "date-time", "description": "Timestamp of last purchase." },
+        "notes": { "type": "string", "description": "Internal notes about the customer." },
         "createdAt": { "type": "string", "format": "date-time", "description": "When the customer was created." }
       },
-      "required": ["name"]
+      "required": ["phone", "couponsCount", "businessId"]
     },
     "Reminder": {
       "title": "Reminder",
@@ -54,12 +62,13 @@
       "type": "object",
       "properties": {
         "customerId": { "type": "string", "description": "The ID of the customer." },
+        "businessId": { "type": "string", "description": "The ID of the business." },
         "amount": { "type": "number", "description": "The purchase amount." },
-        "pointsEarned": { "type": "number", "description": "Points earned from this purchase." },
-        "description": { "type": "string", "description": "Description of the purchase." },
-        "createdAt": { "type": "string", "format": "date-time", "description": "When the purchase occurred." }
+        "paymentMethod": { "type": "string", "description": "Method of payment." },
+        "notes": { "type": "string", "description": "Notes about the purchase." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the purchase occurred." }
       },
-      "required": ["customerId", "amount", "createdAt"]
+      "required": ["customerId", "businessId", "amount", "timestamp"]
     }
   },
   "firestore": {
