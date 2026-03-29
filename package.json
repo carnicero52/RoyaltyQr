@@ -10,9 +10,11 @@
     "start": "node server.ts"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "date-fns": "^4.1.0",
-    "date-fns-tz": "^3.3.0",
+    "date-fns-tz": "^3.2.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.11.0",
@@ -28,8 +30,7 @@
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.2.0",
     "recharts": "^2.15.1",
-    "tailwind-merge": "^3.0.1",
-    "clsx": "^2.1.1"
+    "tailwind-merge": "^3.0.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

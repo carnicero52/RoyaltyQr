@@ -68,6 +68,8 @@ export interface Customer {
   level?: 'bronze' | 'silver' | 'gold';
   referredBy?: string;
   referralCount?: number;
+  telegramChatId?: string;
+  callmebotApiKey?: string;
 }
 
 export interface Purchase {

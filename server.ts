@@ -71,8 +71,55 @@ async function sendNotification(type: string, to: string, message: string) {
     const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN!, { polling: false });
     await bot.sendMessage(to, message);
   } else if (type === "whatsapp") {
-    // Placeholder for WhatsApp logic
-    console.log("WhatsApp notification sent (mock)");
+    const phone = to.replace(/\+/g, "");
+    const apiKey = process.env.WHATSAPP_API_KEY;
+    if (apiKey) {
+      const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error("CallMeBot error:", await response.text());
+      } else {
+        console.log("WhatsApp notification sent via CallMeBot");
+      }
+    } else {
+      console.warn("WHATSAPP_API_KEY not set, skipping WhatsApp notification");
+    }
+  }
+}
+
+// Send summary to owner
+async function sendSummary() {
+  const firestore = await getDb();
+  if (!firestore) return;
+
+  const businessesRef = collection(firestore, "businesses");
+  const businessesSnap = await getDocs(businessesRef);
+
+  const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+
+  for (const busDoc of businessesSnap.docs) {
+    const business = busDoc.data();
+    const businessId = busDoc.id;
+
+    if (!business.notificationsEnabled) continue;
+
+    const purchasesRef = collection(firestore, "businesses", businessId, "purchases");
+    const q = query(purchasesRef, where("timestamp", ">=", oneHourAgo));
+    const purchasesSnap = await getDocs(q);
+
+    if (!purchasesSnap.empty) {
+      const count = purchasesSnap.size;
+      const totalAmount = purchasesSnap.docs.reduce((sum, d) => sum + (d.data().amount || 0), 0);
+      const summaryMsg = `📊 Resumen de la última hora en ${business.name}:\n\n- Ventas registradas: ${count}\n- Monto total: ${business.currency || "$"}${totalAmount.toLocaleString()}`;
+
+      if (business.ownerEmail) await sendNotification("email", business.ownerEmail, summaryMsg);
+      if (business.telegramChatId) await sendNotification("telegram", business.telegramChatId, summaryMsg);
+      if (business.whatsappPhone && business.whatsappApiKey) {
+        const phone = business.whatsappPhone.replace(/\+/g, "");
+        const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(summaryMsg)}&apikey=${business.whatsappApiKey}`;
+        await fetch(url);
+      }
+    }
   }
 }
 
@@ -95,9 +142,45 @@ async function checkReminders() {
     
     if (!businessSnap.empty) {
       const business = businessSnap.docs[0].data();
-      if (business.email) await sendNotification("email", business.email, reminder.message);
-      if (business.telegramId) await sendNotification("telegram", business.telegramId, reminder.message);
-      if (business.whatsappNumber) await sendNotification("whatsapp", business.whatsappNumber, reminder.message);
+      
+      // Notify business owner about the action
+      if (business.ownerEmail) await sendNotification("email", business.ownerEmail, `[NOTIFICACIÓN DUEÑO] Se está procesando un recordatorio: ${reminder.message}`);
+      if (business.telegramChatId) await sendNotification("telegram", business.telegramChatId, `[NOTIFICACIÓN DUEÑO] Recordatorio enviado: ${reminder.message}`);
+      
+      // Notify target customers
+      const targetCustomerIds = reminder.customerIds || (reminder.customerId ? [reminder.customerId] : []);
+      for (const custId of targetCustomerIds) {
+        const custSnap = await getDocs(query(collection(firestore, "businesses", businessId, "customers"), where("__name__", "==", custId)));
+        if (!custSnap.empty) {
+          const cust = custSnap.docs[0].data();
+          
+          // Personal Email
+          if (cust.email) {
+            await sendNotification("email", cust.email, reminder.message);
+          }
+          
+          // Personal Telegram
+          if (cust.telegramChatId) {
+            try {
+              const bot = new TelegramBot(business.telegramToken || process.env.TELEGRAM_BOT_TOKEN!, { polling: false });
+              await bot.sendMessage(cust.telegramChatId, reminder.message);
+            } catch (err) {
+              console.error(`Error sending personal telegram to ${cust.id}:`, err);
+            }
+          }
+          
+          // Personal WhatsApp (CallMeBot)
+          if (cust.callmebotApiKey) {
+            try {
+              const phone = cust.phone.replace(/\+/g, "");
+              const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(reminder.message)}&apikey=${cust.callmebotApiKey}`;
+              await fetch(url);
+            } catch (err) {
+              console.error(`Error sending personal whatsapp to ${cust.id}:`, err);
+            }
+          }
+        }
+      }
       
       await setDoc(doc(firestore, "reminders", docSnap.id), { ...reminder, sent: true }, { merge: true });
     }
@@ -121,6 +204,82 @@ app.get("/api/test-db", async (req, res) => {
     res.json({ success: true, count: businesses.length, data: businesses });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/notify", async (req, res) => {
+  const { type, data, config, message, subject, toEmail, toPhone } = req.body;
+  console.log(`[API/Notify] Received request for type: ${type}`);
+
+  const results: any = {};
+  let msg = message;
+  
+  if (!msg && data) {
+    if (type === "Compra Registrada") {
+      msg = `🔔 ¡Nueva Compra!\n\nCliente: ${data.customer}\nSellos: ${data.coupons}\nNegocio: ${data.business}`;
+    } else if (type === "Premio Alcanzado") {
+      msg = `🎉 ¡PREMIO ALCANZADO!\n\nEl cliente ${data.customer} ha completado sus sellos (${data.coupons}) en ${data.business}.`;
+    } else {
+      msg = `${type}: ${JSON.stringify(data)}`;
+    }
+  }
+  
+  if (!msg) msg = "Notificación del sistema";
+
+  try {
+    // Email
+    if (toEmail || (config?.email && config?.gmailUser && config?.gmailAppPass)) {
+      try {
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: config?.gmailUser || process.env.EMAIL_USER,
+            pass: config?.gmailAppPass || process.env.EMAIL_PASS,
+          },
+        });
+        await transporter.sendMail({
+          from: config?.gmailUser || process.env.EMAIL_USER,
+          to: toEmail || config?.email,
+          subject: subject || `Notificación de ${config?.business || "Fideliza"}`,
+          text: msg,
+        });
+        results.email = { success: true };
+      } catch (err: any) {
+        results.email = { success: false, error: err.message };
+      }
+    }
+
+    // Telegram
+    if (config?.telegramChatId && (config?.telegramToken || process.env.TELEGRAM_BOT_TOKEN)) {
+      try {
+        const bot = new TelegramBot(config.telegramToken || process.env.TELEGRAM_BOT_TOKEN!, { polling: false });
+        await bot.sendMessage(config.telegramChatId, msg);
+        results.telegram = { success: true };
+      } catch (err: any) {
+        results.telegram = { success: false, error: err.message };
+      }
+    }
+
+    // WhatsApp (CallMeBot)
+    if ((toPhone || config?.whatsappPhone) && (config?.whatsappApiKey || process.env.WHATSAPP_API_KEY)) {
+      try {
+        const phone = (toPhone || config.whatsappPhone).replace(/\+/g, "");
+        const apiKey = config.whatsappApiKey || process.env.WHATSAPP_API_KEY;
+        const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(msg)}&apikey=${apiKey}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          results.whatsapp = { success: true };
+        } else {
+          results.whatsapp = { success: false, error: await response.text() };
+        }
+      } catch (err: any) {
+        results.whatsapp = { success: false, error: err.message };
+      }
+    }
+
+    res.json({ success: true, results });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -156,4 +315,6 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on http://localhost:${PORT}`);
   // Run reminder check every minute
   setInterval(checkReminders, 60000);
+  // Run summary check every hour
+  setInterval(sendSummary, 3600000);
 });

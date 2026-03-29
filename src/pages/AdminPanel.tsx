@@ -264,6 +264,14 @@ export default function AdminPanel() {
 
       for (const cust of targetCustomers) {
         try {
+          // Override config with personal customer settings if available
+          const personalConfig = {
+            ...config,
+            telegramChatId: cust.telegramChatId || config.telegramChatId,
+            whatsappApiKey: cust.callmebotApiKey || config.whatsappApiKey,
+            whatsappPhone: cust.phone || config.whatsappPhone,
+          };
+
           console.log(`[Notification] Sending to ${cust.name || cust.phone}...`);
           const response = await fetch(`${window.location.origin}/api/notify`, {
             method: "POST",
@@ -272,7 +280,7 @@ export default function AdminPanel() {
               type: reminderForm.type === "billing" ? "Recordatorio de Cobro" : "Campaña de Marketing",
               message: reminderForm.message,
               subject: reminderForm.subject,
-              config,
+              config: personalConfig,
               toEmail: cust.email,
               toPhone: cust.phone,
             }),
@@ -444,6 +452,8 @@ export default function AdminPanel() {
     const email = formData.get("email") as string;
     const notes = formData.get("notes") as string;
     const referredBy = formData.get("referredBy") as string;
+    const telegramChatId = formData.get("telegramChatId") as string;
+    const callmebotApiKey = formData.get("callmebotApiKey") as string;
 
     // Use phone as ID if provided, otherwise generate a random one
     const customerId = phone && phone.length >= 8 ? phone : `CUST-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
@@ -466,7 +476,9 @@ export default function AdminPanel() {
         businessId: business!.id,
         level: 'bronze',
         referredBy: referredBy || undefined,
-        referralCount: 0
+        referralCount: 0,
+        telegramChatId: telegramChatId || undefined,
+        callmebotApiKey: callmebotApiKey || undefined
       };
       await setDoc(doc(db, "businesses", business!.id, "customers", customerId), newCust);
       
@@ -503,6 +515,8 @@ export default function AdminPanel() {
     const notes = formData.get("notes") as string;
     const status = formData.get("status") as 'active' | 'inactive';
     const couponsCount = parseInt(formData.get("couponsCount") as string);
+    const telegramChatId = formData.get("telegramChatId") as string;
+    const callmebotApiKey = formData.get("callmebotApiKey") as string;
 
     try {
       const updated = { 
@@ -511,7 +525,9 @@ export default function AdminPanel() {
         email: email || "", 
         notes: notes || "", 
         status, 
-        couponsCount 
+        couponsCount,
+        telegramChatId: telegramChatId || undefined,
+        callmebotApiKey: callmebotApiKey || undefined
       };
       await updateDoc(doc(db, "businesses", business!.id, "customers", isEditingCustomer.id), updated);
       setIsEditingCustomer(null);
@@ -2803,6 +2819,34 @@ export default function AdminPanel() {
                         business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
                       )}
                     />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Telegram Chat ID (Opcional)</label>
+                      <input
+                        type="text"
+                        name="telegramChatId"
+                        defaultValue={isEditingCustomer?.telegramChatId}
+                        placeholder="Ej: 123456789"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border transition-all focus:ring-2 focus:ring-orange-500 outline-none",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
+                      />
+                    </div>
+                    <div>
+                      <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>CallMeBot API Key (Opcional)</label>
+                      <input
+                        type="text"
+                        name="callmebotApiKey"
+                        defaultValue={isEditingCustomer?.callmebotApiKey}
+                        placeholder="Tu API Key de CallMeBot"
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border transition-all focus:ring-2 focus:ring-orange-500 outline-none",
+                          business?.darkModeEnabled ? "bg-slate-800 border-slate-700 text-white" : "bg-white border-gray-200 text-gray-900"
+                        )}
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className={cn("block text-sm font-medium mb-1", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>Notas del Cliente</label>
