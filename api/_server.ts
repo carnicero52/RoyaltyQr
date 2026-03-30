@@ -1,6 +1,19 @@
 import express from "express";
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, getDocs, doc, setDoc, query, where, deleteDoc } from "firebase/firestore";
+import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
+import { 
+  getFirestore, 
+  collection, 
+  getDocs, 
+  doc, 
+  getDoc, 
+  query, 
+  where, 
+  updateDoc, 
+  serverTimestamp, 
+  writeBatch,
+  Firestore,
+  Timestamp
+} from "firebase/firestore";
 import nodemailer from "nodemailer";
 import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
@@ -44,39 +57,45 @@ function getFirebaseConfig() {
     firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || localConfig.firestoreDatabaseId
   };
 
-  console.log("[Firebase/Config] Config resolved. API Key present:", !!config.apiKey);
-  console.log("[Firebase/Config] Project ID:", config.projectId);
+  console.log("[Firebase/Config] Config resolved. Project ID:", config.projectId);
   console.log("[Firebase/Config] Database ID:", config.firestoreDatabaseId || "(default)");
 
-  return config.apiKey ? config : null;
+  return config.projectId ? config : null;
 }
 
 // Initialize Firebase Client SDK
-let db: any = null;
+let db: Firestore | null = null;
 
 async function getDb() {
   if (db) return db;
 
   const config = getFirebaseConfig();
   if (!config || !config.apiKey) {
-    console.error("[Firebase/Server] Firebase config not found or incomplete!", config);
+    console.error("[Firebase/Client] Firebase config not found or incomplete!", config);
     return null;
   }
 
   try {
-    console.log("[Firebase/Server] Initializing Firebase with project:", config.projectId);
-    const firebaseApp = initializeApp(config);
-    // Use the database ID if provided, otherwise default
+    console.log("[Firebase/Client] Initializing Client SDK with project:", config.projectId);
+    
+    let clientApp: FirebaseApp;
+    const apps = getApps() || [];
+    if (apps.length === 0) {
+      clientApp = initializeApp(config);
+    } else {
+      clientApp = getApp();
+    }
+    
     const dbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== "(default)" && config.firestoreDatabaseId !== ""
       ? config.firestoreDatabaseId 
       : undefined;
     
-    console.log("[Firebase/Server] Using database ID:", dbId || "(default)");
-    db = dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
-    console.log("[Firebase/Server] Client SDK SUCCESS: Connection verified.");
+    console.log("[Firebase/Client] Using database ID:", dbId || "(default)");
+    db = dbId ? getFirestore(clientApp, dbId) : getFirestore(clientApp);
+    console.log("[Firebase/Client] Client SDK SUCCESS: Connection verified.");
     return db;
   } catch (error) {
-    console.error("[Firebase/Server] Error initializing Client SDK:", error);
+    console.error("[Firebase/Client] Error initializing Client SDK:", error);
     return null;
   }
 }
@@ -84,15 +103,15 @@ async function getDb() {
 // Notification services
 const processingReminders = new Set<string>();
 
-async function sendNotification(type: "email" | "telegram" | "whatsapp", to: string, message: string, config?: any, subject?: string) {
-  console.log(`[Notification] Sending ${type} to ${to}`);
+async function sendNotification(type: string, to: string, message: string, config: any, subject?: string) {
+  console.log(`[Notification] Sending ${type} to ${to}...`);
   
   if (type === "email") {
-    const user = config?.gmailUser || process.env.EMAIL_USER;
-    const pass = config?.gmailAppPass || process.env.EMAIL_PASS;
-    
+    const user = config?.gmailUser || process.env.GMAIL_USER;
+    const pass = config?.gmailAppPass || process.env.GMAIL_APP_PASS;
+
     if (!user || !pass) {
-      throw new Error("Email credentials (gmailUser/gmailAppPass) not configured.");
+      throw new Error("Gmail credentials not configured.");
     }
 
     const transporter = nodemailer.createTransport({
@@ -103,18 +122,18 @@ async function sendNotification(type: "email" | "telegram" | "whatsapp", to: str
     await transporter.sendMail({
       from: user,
       to,
-      subject: subject || "Recordatorio",
+      subject: subject || "Notificación de Negocio",
       text: message,
     });
   } else if (type === "telegram") {
-    const token = config?.telegramToken || process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = to || config?.telegramChatId;
+    const token = config?.telegramToken || process.env.TELEGRAM_TOKEN;
+    const chatId = to || config?.telegramChatId || process.env.TELEGRAM_CHAT_ID;
 
     if (!token || !chatId) {
       throw new Error("Telegram credentials (token/chatId) not configured.");
     }
 
-    const bot = new TelegramBot(token, { polling: false });
+    const bot = new TelegramBot(token);
     await bot.sendMessage(chatId, message);
   } else if (type === "whatsapp") {
     let phone = to.replace(/\D/g, ""); // Remove all non-digits
@@ -140,154 +159,170 @@ async function sendNotification(type: "email" | "telegram" | "whatsapp", to: str
 
 // Send summary to owner
 async function sendSummary() {
+  console.log("[Cron] Checking daily summary...");
   const firestore = await getDb();
   if (!firestore) return;
 
-  const businessesRef = collection(firestore, "businesses");
-  const businessesSnap = await getDocs(businessesRef);
+  try {
+    const businessesSnap = await getDocs(collection(firestore, "businesses"));
+    
+    for (const bDoc of businessesSnap.docs) {
+      const business = bDoc.data();
+      if (!business.notifySummary) continue;
 
-  const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+      const tz = business.timezone || "America/Caracas";
+      const nowInTz = formatInTimeZone(new Date(), tz, "HH:mm");
+      const hour = parseInt(nowInTz.split(":")[0]);
+      const minute = parseInt(nowInTz.split(":")[1]);
 
-  for (const busDoc of businessesSnap.docs) {
-    const business = busDoc.data();
-    const businessId = busDoc.id;
+      // Send summary between 8:00 PM and 8:15 PM
+      // We use a range because the interval is 10 minutes
+      if (hour === 20 && minute < 15) {
+        // Check if already sent today to avoid duplicates within the 15min window
+        const lastSummaryKey = `last_summary_${bDoc.id}_${formatInTimeZone(new Date(), tz, "yyyy-MM-dd")}`;
+        if ((global as any)[lastSummaryKey]) continue;
 
-    if (!business.notificationsEnabled) continue;
+        console.log(`[Cron] Sending summary for ${business.name}`);
+        (global as any)[lastSummaryKey] = true;
+        
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayIso = today.toISOString();
+        
+        const q = query(
+          collection(firestore, "businesses", bDoc.id, "purchases"),
+          where("timestamp", ">=", todayIso)
+        );
+        const purchasesSnap = await getDocs(q);
 
-    const purchasesRef = collection(firestore, "businesses", businessId, "purchases");
-    const q = query(purchasesRef, where("timestamp", ">=", oneHourAgo));
-    const purchasesSnap = await getDocs(q);
-
-    if (!purchasesSnap.empty) {
-      const count = purchasesSnap.size;
-      const totalAmount = purchasesSnap.docs.reduce((sum, d) => sum + (d.data().amount || 0), 0);
-      const summaryMsg = `📊 Resumen de la última hora en ${business.name}:\n\n- Ventas registradas: ${count}\n- Monto total: ${business.currency || "$"}${totalAmount.toLocaleString()}`;
-
-      const config = {
-        gmailUser: business.gmailUser,
-        gmailAppPass: business.gmailAppPass,
-        telegramToken: business.telegramToken,
-        telegramChatId: business.telegramChatId,
-        whatsappApiKey: business.whatsappApiKey,
-      };
-
-      if (business.ownerEmail) {
-        try { await sendNotification("email", business.ownerEmail, summaryMsg, config, `Resumen ${business.name}`); } catch (e) {}
-      }
-      if (business.telegramChatId) {
-        try { await sendNotification("telegram", business.telegramChatId, summaryMsg, config); } catch (e) {}
-      }
-      if (business.whatsappPhone && business.whatsappApiKey) {
-        try { await sendNotification("whatsapp", business.whatsappPhone, summaryMsg, config); } catch (e) {}
+        const count = purchasesSnap.size;
+        const msg = `📊 Resumen Diario - ${business.name}\n\nTotal de compras hoy: ${count}\n¡Buen trabajo!`;
+        
+        if (business.notifyTelegram && business.telegramChatId) {
+          await sendNotification("telegram", business.telegramChatId, msg, business);
+        }
+        if (business.notifyEmail && business.ownerEmail) {
+          await sendNotification("email", business.ownerEmail, msg, business, "Resumen Diario");
+        }
       }
     }
+  } catch (error) {
+    console.error("[Cron] Error in sendSummary:", error);
   }
 }
 
 // Check reminders
 async function checkReminders() {
+  console.log("[Cron] Checking reminders...");
   const firestore = await getDb();
   if (!firestore) return;
 
-  const now = new Date().toISOString();
-  const remindersRef = collection(firestore, "reminders");
-  const q = query(remindersRef, where("scheduledAt", "<=", now), where("status", "==", "pending"));
-
-  const querySnapshot = await getDocs(q);
-  if (querySnapshot.empty) return;
-  
-  console.log(`[Reminders] Found ${querySnapshot.size} pending reminders to process.`);
-
-  for (const docSnap of querySnapshot.docs) {
-    const reminderId = docSnap.id;
-    if (processingReminders.has(reminderId)) continue;
+  try {
+    const now = new Date();
     
-    processingReminders.add(reminderId);
-    const reminder = docSnap.data();
-    const businessId = reminder.businessId;
-    
-    try {
-      // Mark as processing immediately to avoid double processing
-      await setDoc(doc(firestore, "reminders", reminderId), { ...reminder, status: "processing" }, { merge: true });
-      
-      const businessDoc = await getDocs(query(collection(firestore, "businesses"), where("__name__", "==", businessId)));
-      
-      if (!businessDoc.empty) {
-        const business = businessDoc.docs[0].data();
-        const config = {
-          gmailUser: business.gmailUser,
-          gmailAppPass: business.gmailAppPass,
-          telegramToken: business.telegramToken,
-          whatsappApiKey: business.whatsappApiKey,
-        };
-        
-        console.log(`[Reminders] Processing reminder for business: ${business.name}`);
+    // Get pending reminders
+    const q = query(collection(firestore, "reminders"), where("status", "==", "pending"));
+    const snapshot = await getDocs(q);
 
-        // Notify target customers
-        const targetCustomerIds = reminder.customerIds || (reminder.customerId ? [reminder.customerId] : []);
-        let anySuccess = false;
-        let errors: string[] = [];
+    if (snapshot.empty) {
+      console.log("[Cron] No pending reminders.");
+      return;
+    }
 
-        for (const custId of targetCustomerIds) {
-          const custSnap = await getDocs(query(collection(firestore, "businesses", businessId, "customers"), where("__name__", "==", custId)));
-          if (!custSnap.empty) {
-            const cust = custSnap.docs[0].data();
-            
-            // Personal Email
-            if (cust.email) {
-              try {
-                await sendNotification("email", cust.email, reminder.message, config, reminder.subject);
-                anySuccess = true;
-              } catch (err: any) {
-                errors.push(`Email to ${cust.email} failed: ${err.message}`);
-              }
-            }
-            
-            // Personal Telegram
-            if (cust.telegramChatId) {
-              try {
-                await sendNotification("telegram", cust.telegramChatId, reminder.message, config);
-                anySuccess = true;
-              } catch (err: any) {
-                errors.push(`Telegram to ${cust.telegramChatId} failed: ${err.message}`);
-              }
-            }
-            
-            // Personal WhatsApp (CallMeBot)
-            if (cust.phone && (cust.callmebotApiKey || business.whatsappApiKey)) {
-              try {
-                const personalConfig = { ...config, whatsappApiKey: cust.callmebotApiKey || business.whatsappApiKey };
-                await sendNotification("whatsapp", cust.phone, reminder.message, personalConfig);
-                anySuccess = true;
-              } catch (err: any) {
-                errors.push(`WhatsApp to ${cust.phone} failed: ${err.message}`);
-              }
+    for (const docSnap of snapshot.docs) {
+      const reminderId = docSnap.id;
+      if (processingReminders.has(reminderId)) continue;
+      
+      const reminder = docSnap.data();
+      let scheduledTime: Date;
+
+      try {
+        if (typeof reminder.scheduledAt === "string") {
+          scheduledTime = new Date(reminder.scheduledAt);
+        } else if (reminder.scheduledAt instanceof Timestamp) {
+          scheduledTime = reminder.scheduledAt.toDate();
+        } else if (reminder.scheduledAt?.toDate) {
+          scheduledTime = reminder.scheduledAt.toDate();
+        } else if (reminder.scheduledAt?.seconds) {
+          scheduledTime = new Date(reminder.scheduledAt.seconds * 1000);
+        } else {
+          scheduledTime = new Date(reminder.scheduledAt);
+        }
+      } catch (e) {
+        console.error(`[Cron] Invalid date for reminder ${reminderId}:`, reminder.scheduledAt);
+        continue;
+      }
+
+      if (scheduledTime <= now) {
+        processingReminders.add(reminderId);
+        console.log(`[Cron] Processing reminder: ${reminderId}`);
+
+        try {
+          // Fetch business config
+          const businessSnap = await getDoc(doc(firestore, "businesses", reminder.businessId));
+          const business = businessSnap.data();
+
+          if (!business) {
+            throw new Error(`Business ${reminder.businessId} not found.`);
+          }
+
+          // Fetch customer data
+          const customerSnap = await getDoc(doc(firestore, "businesses", reminder.businessId, "customers", reminder.customerId));
+          const customer = customerSnap.data();
+
+          if (!customer) {
+            throw new Error(`Customer ${reminder.customerId} not found.`);
+          }
+
+          // Determine notification methods
+          const methods = [];
+          if (business.notifyEmail && (customer.email || business.ownerEmail)) methods.push("email");
+          if (business.notifyTelegram && business.telegramChatId) methods.push("telegram");
+          if (business.notifyWhatsapp && (customer.phone || business.whatsappPhone)) methods.push("whatsapp");
+
+          const results = [];
+          for (const method of methods) {
+            try {
+              const to = method === "email" ? (customer.email || business.ownerEmail) : 
+                         method === "telegram" ? business.telegramChatId : 
+                         (customer.phone || business.whatsappPhone);
+              
+              await sendNotification(method, to, reminder.message, business, reminder.subject);
+              results.push({ method, status: "success" });
+            } catch (err: any) {
+              console.error(`[Cron] Error sending ${method}:`, err.message);
+              results.push({ method, status: "error", error: err.message });
             }
           }
+
+          // Update reminder status
+          const finalStatus = results.some(r => r.status === "success") ? "sent" : "failed";
+          await updateDoc(docSnap.ref, {
+            status: finalStatus,
+            sentAt: serverTimestamp(),
+            results
+          });
+
+          // Notify admin if it failed
+          if (finalStatus === "failed") {
+            try {
+              await sendNotification("telegram", business.telegramChatId, `⚠️ Error al enviar recordatorio a ${customer.name}: ${results.map(r => r.error).join(", ")}`, business);
+            } catch (e) {}
+          }
+
+        } catch (err: any) {
+          console.error(`[Cron] Fatal error processing reminder ${reminderId}:`, err);
+          await updateDoc(docSnap.ref, {
+            status: "error",
+            error: err.message
+          });
+        } finally {
+          processingReminders.delete(reminderId);
         }
-        
-        // Notify business owner ONCE after all customers are processed
-        if (business.ownerEmail && anySuccess) {
-          try { 
-            const summary = `[NOTIFICACIÓN] Se ha enviado el recordatorio "${reminder.subject || 'Sin asunto'}" a ${targetCustomerIds.length} clientes.`;
-            await sendNotification("email", business.ownerEmail, summary, config, `Recordatorio Enviado: ${business.name}`); 
-          } catch (e) {}
-        }
-        
-        await setDoc(doc(firestore, "reminders", reminderId), { 
-          ...reminder, 
-          status: anySuccess ? "sent" : "failed",
-          statusMessage: errors.length > 0 ? errors.join(", ") : undefined
-        }, { merge: true });
-      } else {
-        console.warn(`[Reminders] Business ${businessId} not found for reminder ${reminderId}`);
-        await setDoc(doc(firestore, "reminders", reminderId), { ...reminder, status: "failed", statusMessage: "Business not found" }, { merge: true });
       }
-    } catch (err: any) {
-      console.error(`[Reminders] Error processing reminder ${reminderId}:`, err);
-    } finally {
-      processingReminders.delete(reminderId);
     }
+  } catch (error) {
+    console.error("[Cron] Error in checkReminders:", error);
   }
 }
 
@@ -318,14 +353,13 @@ app.get("/api/test-db", async (req, res) => {
       console.error("[API/TestDB] DB initialization failed");
       return res.status(500).json({ 
         error: "DB not initialized", 
-        details: "Check server logs for initialization errors",
-        hasEnv: !!(process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY)
+        details: "Check server logs for initialization errors"
       });
     }
 
     const dbInfo = {
-      projectId: firestore.app.options.projectId,
-      databaseId: (firestore as any)._databaseId?.database || "(default)"
+      projectId: getApp().options.projectId,
+      databaseId: (firestore as any).databaseId || "(default)"
     };
     
     console.log("[API/TestDB] Fetching businesses...");
@@ -400,6 +434,17 @@ app.post("/api/process-reminders", async (req, res) => {
   }
 });
 
+app.get("/api/cron", async (req, res) => {
+  console.log("[Cron] Manual trigger received");
+  try {
+    await checkReminders();
+    await sendSummary();
+    res.json({ success: true, message: "Cron tasks executed." });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.post("/api/clear-history/:type", async (req, res) => {
   const { type } = req.params;
   const { businessId } = req.body;
@@ -415,31 +460,28 @@ app.post("/api/clear-history/:type", async (req, res) => {
     let deletedCount = 0;
 
     // Clear reminders of specific type for this business
-    const remindersRef = collection(firestore, "reminders");
-    const qReminders = query(
-      remindersRef, 
-      where("businessId", "==", businessId)
-    );
-    const reminderSnap = await getDocs(qReminders);
+    const qReminders = query(collection(firestore, "reminders"), where("businessId", "==", businessId));
+    const snapshot = await getDocs(qReminders);
     
-    for (const docSnap of reminderSnap.docs) {
+    const batch = writeBatch(firestore);
+    snapshot.docs.forEach(docSnap => {
       const data = docSnap.data();
-      // Delete if type matches OR if it's billing and type is missing (legacy)
       if (data.type === type || (type === "billing" && !data.type)) {
-        await deleteDoc(doc(firestore, "reminders", docSnap.id));
+        batch.delete(docSnap.ref);
         deletedCount++;
       }
-    }
+    });
 
     // If billing, also clear purchases
     if (type === "billing") {
-      const purchasesRef = collection(firestore, "businesses", businessId, "purchases");
-      const purchaseSnap = await getDocs(purchasesRef);
-      for (const docSnap of purchaseSnap.docs) {
-        await deleteDoc(doc(firestore, "businesses", businessId, "purchases", docSnap.id));
+      const purchasesSnap = await getDocs(collection(firestore, "businesses", businessId, "purchases"));
+      purchasesSnap.docs.forEach(docSnap => {
+        batch.delete(docSnap.ref);
         deletedCount++;
-      }
+      });
     }
+
+    await batch.commit();
 
     res.json({ 
       success: true, 
@@ -471,14 +513,33 @@ app.use((err: any, req: any, res: any, next: any) => {
   });
 });
 
+// Start Cron Jobs
+console.log("[Cron] Starting background tasks...");
+
+// Run reminder check every minute
+setInterval(() => {
+  console.log("[Cron/Interval] Triggering checkReminders...");
+  checkReminders().catch(err => console.error("[Cron/Interval] Error in checkReminders:", err));
+}, 60000);
+
+// Run summary check every 10 minutes
+setInterval(() => {
+  console.log("[Cron/Interval] Triggering sendSummary...");
+  sendSummary().catch(err => console.error("[Cron/Interval] Error in sendSummary:", err));
+}, 600000);
+
+// Run immediately on start
+setTimeout(() => {
+  console.log("[Cron/Startup] Running initial checks...");
+  checkReminders();
+  sendSummary();
+}, 5000);
+
 export default app;
 
 if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    // Run reminder check every 10 seconds
-    setInterval(checkReminders, 10000);
-    // Run summary check every hour
-    setInterval(sendSummary, 3600000);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 }

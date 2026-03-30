@@ -48,8 +48,10 @@ service cloud.firestore {
       match /purchases/{purchaseId} {
         // Allow create for PublicPanel
         allow create: if true;
-        // Allow full access for managers
-        allow read, write: if canManageBusiness(businessId);
+        // Allow read for the cron job summary (unauthenticated) or managers
+        allow read: if true; 
+        // Allow write for managers
+        allow write: if canManageBusiness(businessId);
       }
 
       // Staff Subcollection
@@ -64,15 +66,25 @@ service cloud.firestore {
     // Reminders Collection (Top-level)
     match /reminders/{reminderId} {
       // Allow read if user is owner or staff of the business
-      allow read: if isAuthenticated() && (
+      // OR allow read for the cron job (unauthenticated) to find pending reminders
+      allow read: if (isAuthenticated() && (
         isOwner(resource.data.businessId) || isStaff(resource.data.businessId)
-      );
+      )) || (resource.data.status == 'pending');
+
       // Allow create if user is owner or staff of the business
       allow create: if isAuthenticated() && (
         isOwner(request.resource.data.businessId) || isStaff(request.resource.data.businessId)
       );
+
       // Allow update/delete if user is owner or staff of the business
-      allow update, delete: if isAuthenticated() && (
+      // OR allow update for the cron job to update status/results
+      allow update: if (isAuthenticated() && (
+        isOwner(resource.data.businessId) || isStaff(resource.data.businessId)
+      )) || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'sentAt', 'results', 'error'])
+      );
+      
+      allow delete: if isAuthenticated() && (
         isOwner(resource.data.businessId) || isStaff(resource.data.businessId)
       );
     }
