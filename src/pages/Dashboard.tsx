@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Store, ChevronRight, LogOut, Settings, User, AlertTriangle } from 'lucide-react';
@@ -140,13 +140,13 @@ const Dashboard: React.FC = () => {
         )}
 
         {/* Debug Info - Only visible for the developer email */}
-        {auth.currentUser?.email === 'marcorodolfo40@gmail.com' && (
+        {user?.email === 'marcorodolfo40@gmail.com' && (
           <div className="mb-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-400 text-xs font-mono flex flex-col gap-1">
             <p className="font-bold mb-1">Debug Info:</p>
-            <p>User UID: {auth.currentUser?.uid}</p>
+            <p>User UID: {user?.uid}</p>
             <p>Project ID: {db.app.options.projectId}</p>
             <p>Database ID: {(db as any)._databaseId?.database || '(default)'}</p>
-            <p>Auth Ready: {auth.currentUser ? 'Yes' : 'No'}</p>
+            <p>Auth Ready: {user ? 'Yes' : 'No'}</p>
           </div>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

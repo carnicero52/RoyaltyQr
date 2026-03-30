@@ -16,6 +16,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!auth) {
+      console.error("Auth instance is not initialized!");
+      setLoading(false);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
@@ -24,10 +29,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async () => {
+    if (!auth) throw new Error("Auth not initialized");
     await signInWithPopup(auth, googleProvider);
   };
 
   const logout = async () => {
+    if (!auth) throw new Error("Auth not initialized");
     await signOut(auth);
   };
 

@@ -6,6 +6,7 @@ import { motion } from 'motion/react';
 
 const LoginPage: React.FC = () => {
   const { login, user } = useAuth();
+  const [error, setError] = React.useState<string | null>(null);
   const navigate = useNavigate();
 
   React.useEffect(() => {
@@ -15,11 +16,13 @@ const LoginPage: React.FC = () => {
   }, [user, navigate]);
 
   const handleLogin = async () => {
+    setError(null);
     try {
       await login();
       navigate('/dashboard');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login failed:', error);
+      setError(error.message || 'Error al iniciar sesión');
     }
   };
 
@@ -37,6 +40,12 @@ const LoginPage: React.FC = () => {
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Royalty QR</h1>
           <p className="text-gray-400">La plataforma de fidelización para tu negocio</p>
         </div>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+            {error}
+          </div>
+        )}
 
         <div className="space-y-6">
           <button
