@@ -82,6 +82,8 @@ async function getDb() {
 }
 
 // Notification services
+const processingReminders = new Set<string>();
+
 async function sendNotification(type: "email" | "telegram" | "whatsapp", to: string, message: string, config?: any, subject?: string) {
   console.log(`[Notification] Sending ${type} to ${to}`);
   
@@ -115,7 +117,11 @@ async function sendNotification(type: "email" | "telegram" | "whatsapp", to: str
     const bot = new TelegramBot(token, { polling: false });
     await bot.sendMessage(chatId, message);
   } else if (type === "whatsapp") {
-    const phone = to.replace(/\+/g, "");
+    let phone = to.replace(/\D/g, ""); // Remove all non-digits
+    // Ensure country code (default to 58 for Venezuela if it starts with 0 or is 10 digits)
+    if (phone.startsWith("0")) phone = "58" + phone.substring(1);
+    if (phone.length === 10) phone = "58" + phone;
+    
     const apiKey = config?.whatsappApiKey || process.env.WHATSAPP_API_KEY;
 
     if (!phone || !apiKey) {
@@ -123,6 +129,7 @@ async function sendNotification(type: "email" | "telegram" | "whatsapp", to: str
     }
 
     const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
+    console.log(`[WhatsApp] Calling URL: ${url.replace(apiKey, 'HIDDEN')}`);
     const response = await fetch(url);
     if (!response.ok) {
       const errorText = await response.text();
@@ -187,13 +194,22 @@ async function checkReminders() {
   const q = query(remindersRef, where("scheduledAt", "<=", now), where("status", "==", "pending"));
 
   const querySnapshot = await getDocs(q);
+  if (querySnapshot.empty) return;
+  
   console.log(`[Reminders] Found ${querySnapshot.size} pending reminders to process.`);
 
   for (const docSnap of querySnapshot.docs) {
+    const reminderId = docSnap.id;
+    if (processingReminders.has(reminderId)) continue;
+    
+    processingReminders.add(reminderId);
     const reminder = docSnap.data();
     const businessId = reminder.businessId;
     
     try {
+      // Mark as processing immediately to avoid double processing
+      await setDoc(doc(firestore, "reminders", reminderId), { ...reminder, status: "processing" }, { merge: true });
+      
       const businessDoc = await getDocs(query(collection(firestore, "businesses"), where("__name__", "==", businessId)));
       
       if (!businessDoc.empty) {
@@ -207,11 +223,6 @@ async function checkReminders() {
         
         console.log(`[Reminders] Processing reminder for business: ${business.name}`);
 
-        // Notify business owner about the action (optional)
-        if (business.ownerEmail) {
-          try { await sendNotification("email", business.ownerEmail, `[NOTIFICACIÓN DUEÑO] Se está procesando un recordatorio: ${reminder.message}`, config); } catch (e) {}
-        }
-        
         // Notify target customers
         const targetCustomerIds = reminder.customerIds || (reminder.customerId ? [reminder.customerId] : []);
         let anySuccess = false;
@@ -255,17 +266,27 @@ async function checkReminders() {
           }
         }
         
-        await setDoc(doc(firestore, "reminders", docSnap.id), { 
+        // Notify business owner ONCE after all customers are processed
+        if (business.ownerEmail && anySuccess) {
+          try { 
+            const summary = `[NOTIFICACIÓN] Se ha enviado el recordatorio "${reminder.subject || 'Sin asunto'}" a ${targetCustomerIds.length} clientes.`;
+            await sendNotification("email", business.ownerEmail, summary, config, `Recordatorio Enviado: ${business.name}`); 
+          } catch (e) {}
+        }
+        
+        await setDoc(doc(firestore, "reminders", reminderId), { 
           ...reminder, 
           status: anySuccess ? "sent" : "failed",
           statusMessage: errors.length > 0 ? errors.join(", ") : undefined
         }, { merge: true });
       } else {
-        console.warn(`[Reminders] Business ${businessId} not found for reminder ${docSnap.id}`);
-        await setDoc(doc(firestore, "reminders", docSnap.id), { ...reminder, status: "failed", statusMessage: "Business not found" }, { merge: true });
+        console.warn(`[Reminders] Business ${businessId} not found for reminder ${reminderId}`);
+        await setDoc(doc(firestore, "reminders", reminderId), { ...reminder, status: "failed", statusMessage: "Business not found" }, { merge: true });
       }
     } catch (err: any) {
-      console.error(`[Reminders] Error processing reminder ${docSnap.id}:`, err);
+      console.error(`[Reminders] Error processing reminder ${reminderId}:`, err);
+    } finally {
+      processingReminders.delete(reminderId);
     }
   }
 }
@@ -345,7 +366,9 @@ app.post("/api/notify", async (req, res) => {
 
   const results: any = {};
   const methods: ("email" | "telegram" | "whatsapp")[] = [];
-  if (toEmail || config?.email) methods.push("email");
+  
+  // Determine which channels to use
+  if (toEmail || (config?.email && !data)) methods.push("email");
   if (config?.telegramChatId) methods.push("telegram");
   if (toPhone || config?.whatsappPhone) methods.push("whatsapp");
 
@@ -354,9 +377,13 @@ app.post("/api/notify", async (req, res) => {
       const to = method === "email" ? (toEmail || config.email) : 
                  method === "telegram" ? config.telegramChatId : 
                  (toPhone || config.whatsappPhone);
+      
+      if (!to) continue;
+      
       await sendNotification(method, to, msg, config, subject);
       results[method] = { success: true };
     } catch (err: any) {
+      console.error(`[API/Notify] Error sending ${method}:`, err);
       results[method] = { success: false, error: err.message };
     }
   }
@@ -391,14 +418,17 @@ app.post("/api/clear-history/:type", async (req, res) => {
     const remindersRef = collection(firestore, "reminders");
     const qReminders = query(
       remindersRef, 
-      where("businessId", "==", businessId),
-      where("type", "==", type)
+      where("businessId", "==", businessId)
     );
     const reminderSnap = await getDocs(qReminders);
     
     for (const docSnap of reminderSnap.docs) {
-      await deleteDoc(doc(firestore, "reminders", docSnap.id));
-      deletedCount++;
+      const data = docSnap.data();
+      // Delete if type matches OR if it's billing and type is missing (legacy)
+      if (data.type === type || (type === "billing" && !data.type)) {
+        await deleteDoc(doc(firestore, "reminders", docSnap.id));
+        deletedCount++;
+      }
     }
 
     // If billing, also clear purchases
@@ -410,7 +440,7 @@ app.post("/api/clear-history/:type", async (req, res) => {
         deletedCount++;
       }
     }
-    
+
     res.json({ 
       success: true, 
       message: `Historial de ${type} limpiado con éxito.`,
@@ -418,7 +448,7 @@ app.post("/api/clear-history/:type", async (req, res) => {
     });
   } catch (error: any) {
     console.error(`Error clearing ${type} history:`, error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

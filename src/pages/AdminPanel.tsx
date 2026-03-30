@@ -111,6 +111,15 @@ export default function AdminPanel() {
     doc.save(`recibo-${purchase.id}.pdf`);
   };
 
+  const [lastRefresh, setLastRefresh] = useState(new Date());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLastRefresh(new Date());
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid || !businessId) return;
@@ -265,12 +274,19 @@ export default function AdminPanel() {
       for (const cust of targetCustomers) {
         try {
           // Override config with personal customer settings if available
+          // Only send to customer-specific IDs if they exist, otherwise don't send to business IDs by mistake
           const personalConfig = {
             ...config,
-            telegramChatId: cust.telegramChatId || config.telegramChatId,
+            telegramChatId: cust.telegramChatId || undefined,
             whatsappApiKey: cust.callmebotApiKey || config.whatsappApiKey,
-            whatsappPhone: cust.phone || config.whatsappPhone,
+            whatsappPhone: cust.phone || undefined,
           };
+
+          // If no destination for this customer, skip
+          if (!cust.email && !cust.telegramChatId && !cust.phone) {
+            console.log(`[Notification] Skipping ${cust.name || 'Unknown'} - No contact info`);
+            continue;
+          }
 
           console.log(`[Notification] Sending to ${cust.name || cust.phone}...`);
           const response = await fetch(`${window.location.origin}/api/notify`, {
@@ -1038,8 +1054,8 @@ export default function AdminPanel() {
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="font-bold text-orange-600">+{business.currency || "$"} {purchase.amount?.toLocaleString()}</p>
-                            <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">{purchase.paymentMethod}</p>
+                            <p className="font-bold text-orange-600">+{business.currency || "$"} {(purchase.amount || 0).toLocaleString()}</p>
+                            <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">{purchase.paymentMethod || "Sello"}</p>
                           </div>
                         </div>
                       );
@@ -2331,12 +2347,14 @@ export default function AdminPanel() {
                     <h3 className={cn("font-bold mb-4", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Estadísticas de Cobro</h3>
                     <div className="space-y-4">
                       <div className="flex justify-between items-center">
-                        <span className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Pagos Pendientes</span>
-                        <span className="font-bold text-red-500">5</span>
+                        <span className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Ventas Totales</span>
+                        <span className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{purchases.length}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Recordatorios Enviados (Mes)</span>
-                        <span className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>42</span>
+                        <span className={cn("text-sm", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Recordatorios Enviados</span>
+                        <span className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>
+                          {reminders.filter(r => r.type === "billing" && r.status === "sent").length}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -2347,17 +2365,22 @@ export default function AdminPanel() {
                   )}>
                     <h3 className={cn("font-bold mb-4", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Actividad Reciente</h3>
                     <div className="space-y-4">
-                      <div className={cn(
-                        "flex items-start space-x-3 p-3 rounded-2xl transition-colors duration-300",
-                        business?.darkModeEnabled ? "bg-slate-800" : "bg-gray-50"
-                      )}>
-                        <div className="p-2 bg-blue-100 rounded-lg text-blue-600"><Mail className="h-4 w-4" /></div>
-                        <div className="flex-1">
-                          <p className={cn("text-sm font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Recordatorio Masivo Enviado</p>
-                          <p className="text-xs text-gray-500">A 15 clientes vía Email</p>
-                          <p className="text-[10px] text-gray-400 mt-1">Hace 2 días</p>
+                      {reminders.filter(r => r.type === "billing").slice(0, 3).map(r => (
+                        <div key={r.id} className={cn(
+                          "flex items-start space-x-3 p-3 rounded-2xl transition-colors duration-300",
+                          business?.darkModeEnabled ? "bg-slate-800" : "bg-gray-50"
+                        )}>
+                          <div className="p-2 bg-blue-100 rounded-lg text-blue-600"><Bell className="h-4 w-4" /></div>
+                          <div className="flex-1">
+                            <p className={cn("text-sm font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>{r.subject || "Recordatorio de Pago"}</p>
+                            <p className="text-xs text-gray-500">Estado: {r.status === 'sent' ? 'Enviado' : r.status === 'pending' ? 'Pendiente' : 'Fallido'}</p>
+                            <p className="text-[10px] text-gray-400 mt-1">{formatDate(new Date(r.scheduledAt), "d MMM, HH:mm", { locale: es })}</p>
+                          </div>
                         </div>
-                      </div>
+                      ))}
+                      {reminders.filter(r => r.type === "billing").length === 0 && (
+                        <p className="text-xs text-gray-400 text-center py-4">Sin actividad reciente.</p>
+                      )}
                     </div>
                   </div>
                 </div>

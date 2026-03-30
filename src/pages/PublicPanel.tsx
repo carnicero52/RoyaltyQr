@@ -111,8 +111,8 @@ export default function PublicPanel() {
       });
 
       // Add to Purchase History
-      const purchasePath = `businesses/${businessId}/purchases`;
-      await addDoc(collection(db, businessId!, "purchases"), {
+      const purchaseRef = collection(db, "businesses", businessId!, "purchases");
+      await addDoc(purchaseRef, {
         customerId: phone,
         businessId: businessId!,
         timestamp: now,
