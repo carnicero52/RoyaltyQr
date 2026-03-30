@@ -160,11 +160,11 @@ export default function AdminPanel() {
     }, (err) => handleFirestoreError(err, OperationType.LIST, `businesses/${businessId}/purchases`));
 
     // Real-time Reminders
-    const qReminders = query(collection(db, "businesses", businessId, "reminders"), orderBy("scheduledAt", "desc"));
+    const qReminders = query(collection(db, "reminders"), where("businessId", "==", businessId), orderBy("scheduledAt", "desc"));
     const unsubReminders = onSnapshot(qReminders, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Reminder));
       setReminders(list);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, `businesses/${businessId}/reminders`));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `reminders`));
 
     // Real-time Staff
     const unsubStaff = onSnapshot(collection(db, "businesses", businessId, "staff"), (snap) => {
@@ -217,9 +217,9 @@ export default function AdminPanel() {
         customerIds: selectedCustomers,
         status: "pending"
       };
-      const path = `businesses/${business.id}/reminders`;
+      const path = `reminders`;
       try {
-        await addDoc(collection(db, "businesses", business.id, "reminders"), reminderData);
+        await addDoc(collection(db, "reminders"), reminderData);
       } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, path);
       }
@@ -321,7 +321,7 @@ export default function AdminPanel() {
         status: anySuccess ? "sent" : "failed",
         statusMessage: statusMessage
       };
-      await addDoc(collection(db, "businesses", business.id, "reminders"), reminderData);
+      await addDoc(collection(db, "reminders"), reminderData);
 
       if (anySuccess) {
         setStatus({ 
@@ -421,34 +421,40 @@ export default function AdminPanel() {
     }
   };
 
+  const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null);
+
   const handleClearHistory = async (type: "billing" | "marketing") => {
     if (!business) return;
     const confirmMessage = type === "billing" 
       ? "¿Estás seguro de que deseas limpiar el historial de cobranzas? Esto eliminará todos los registros de ventas y recordatorios de pago."
       : "¿Estás seguro de que deseas limpiar el historial de marketing? Esto eliminará todos los recordatorios y campañas de marketing.";
     
-    if (!window.confirm(confirmMessage)) return;
-    
-    setSaving(true);
-    setStatus({ type: "warning", message: `Limpiando historial de ${type === "billing" ? "cobranzas" : "marketing"}...` });
-    try {
-      const response = await fetch(`/api/clear-history/${type}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ businessId: business.id }),
-      });
-      const data = await response.json();
-      if (data.success) {
-        setStatus({ type: "success", message: data.message });
-      } else {
-        setStatus({ type: "error", message: `Error: ${data.error}` });
+    setConfirmAction({
+      message: confirmMessage,
+      onConfirm: async () => {
+        setSaving(true);
+        setStatus({ type: "warning", message: `Limpiando historial de ${type === "billing" ? "cobranzas" : "marketing"}...` });
+        try {
+          const response = await fetch(`/api/clear-history/${type}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ businessId: business.id }),
+          });
+          const data = await response.json();
+          if (data.success) {
+            setStatus({ type: "success", message: data.message });
+          } else {
+            setStatus({ type: "error", message: `Error: ${data.error}` });
+          }
+        } catch (error: any) {
+          console.error(`Error clearing ${type} history:`, error);
+          setStatus({ type: "error", message: "Error al conectar con el servidor." });
+        } finally {
+          setSaving(false);
+          setConfirmAction(null);
+        }
       }
-    } catch (error: any) {
-      console.error(`Error clearing ${type} history:`, error);
-      setStatus({ type: "error", message: "Error al conectar con el servidor." });
-    } finally {
-      setSaving(false);
-    }
+    });
   };
 
   const handleAddCustomer = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -653,13 +659,19 @@ export default function AdminPanel() {
   };
 
   const handleDeleteCustomer = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this customer?")) return;
-    try {
-      await deleteDoc(doc(db, "businesses", business!.id, "customers", id));
-      setStatus({ message: "Cliente eliminado con éxito", type: 'success' });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `businesses/${business!.id}/customers/${id}`);
-    }
+    setConfirmAction({
+      message: "¿Estás seguro de que deseas eliminar este cliente? Esta acción no se puede deshacer.",
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, "businesses", business!.id, "customers", id));
+          setStatus({ message: "Cliente eliminado con éxito", type: 'success' });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `businesses/${business!.id}/customers/${id}`);
+        } finally {
+          setConfirmAction(null);
+        }
+      }
+    });
   };
 
   const fetchCustomerHistory = async (customerId: string) => {
@@ -2753,10 +2765,20 @@ export default function AdminPanel() {
                           </td>
                           <td className="px-6 py-4 text-right">
                             <button 
-                              onClick={async () => {
-                                if (window.confirm("¿Eliminar empleado?")) {
-                                  await deleteDoc(doc(db, "businesses", business.id, "staff", s.id));
-                                }
+                              onClick={() => {
+                                setConfirmAction({
+                                  message: "¿Estás seguro de que deseas eliminar este empleado?",
+                                  onConfirm: async () => {
+                                    try {
+                                      await deleteDoc(doc(db, "businesses", business.id, "staff", s.id));
+                                      setStatus({ message: "Empleado eliminado", type: 'success' });
+                                    } catch (err) {
+                                      handleFirestoreError(err, OperationType.DELETE, `businesses/${business.id}/staff/${s.id}`);
+                                    } finally {
+                                      setConfirmAction(null);
+                                    }
+                                  }
+                                });
                               }}
                               className="p-2 text-gray-400 hover:text-red-600 transition-all"
                             >
@@ -3038,6 +3060,41 @@ export default function AdminPanel() {
               <X className="h-4 w-4" />
             </button>
           </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {confirmAction && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-gray-100"
+            >
+              <div className="flex items-center space-x-3 text-amber-600 mb-4">
+                <AlertCircle className="h-6 w-6" />
+                <h3 className="text-xl font-bold">Confirmar Acción</h3>
+              </div>
+              <p className="text-gray-600 mb-8 leading-relaxed">
+                {confirmAction.message}
+              </p>
+              <div className="flex space-x-4">
+                <button
+                  onClick={() => setConfirmAction(null)}
+                  className="flex-1 px-6 py-3 rounded-2xl font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmAction.onConfirm}
+                  className="flex-1 px-6 py-3 rounded-2xl font-bold bg-amber-600 text-white hover:bg-amber-700 transition-all shadow-lg shadow-amber-200"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

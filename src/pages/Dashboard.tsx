@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -30,28 +30,26 @@ const Dashboard: React.FC = () => {
       return;
     }
 
-    const fetchBusinesses = async () => {
-      try {
-        const q = query(
-          collection(db, 'businesses'),
-          where('ownerUid', '==', user.uid)
-        );
-        const snapshot = await getDocs(q);
-        const list = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Business[];
-        setBusinesses(list);
-        setError(null);
-      } catch (err: any) {
-        console.error('Error fetching businesses:', err);
-        setError(`Error al cargar negocios: ${err.message}`);
-      } finally {
-        setLoading(false);
-      }
-    };
+    const q = query(
+      collection(db, 'businesses'),
+      where('ownerUid', '==', user.uid)
+    );
 
-    fetchBusinesses();
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Business[];
+      setBusinesses(list);
+      setError(null);
+      setLoading(false);
+    }, (err: any) => {
+      console.error('Error fetching businesses:', err);
+      setError(`Error al cargar negocios: ${err.message}`);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, [user, navigate]);
 
   const handleCreateBusiness = async (e: React.FormEvent) => {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, query, where, getDocs, orderBy, limit } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, query, where, getDocs, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { Business, Customer } from "../types";
 import { Phone, Gift, CheckCircle2, AlertCircle, Clock, ArrowRight, Moon, Sun } from "lucide-react";
@@ -23,10 +23,33 @@ export default function PublicPanel() {
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
-    if (businessId) {
-      fetchBusiness();
-    }
+    if (!businessId) return;
+
+    const unsubscribe = onSnapshot(doc(db, "businesses", businessId), (snapshot) => {
+      if (snapshot.exists()) {
+        setBusiness({ id: snapshot.id, ...snapshot.data() } as Business);
+      }
+      setLoading(false);
+    }, (err) => {
+      console.error("Error fetching business:", err);
+      handleFirestoreError(err, OperationType.GET, `businesses/${businessId}`);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId || !customer?.id) return;
+
+    const unsubscribe = onSnapshot(doc(db, "businesses", businessId, "customers", customer.id), (snapshot) => {
+      if (snapshot.exists()) {
+        setCustomer({ id: snapshot.id, ...snapshot.data() } as Customer);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [businessId, customer?.id]);
 
   useEffect(() => {
     if (business) {
@@ -36,21 +59,6 @@ export default function PublicPanel() {
       }
     }
   }, [business]);
-
-  const fetchBusiness = async () => {
-    try {
-      const docRef = doc(db, "businesses", businessId!);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setBusiness({ id: docSnap.id, ...docSnap.data() } as Business);
-      }
-    } catch (err) {
-      console.error("Error fetching business:", err);
-      handleFirestoreError(err, OperationType.GET, `businesses/${businessId}`);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleIdentify = async (e: React.FormEvent) => {
     e.preventDefault();
