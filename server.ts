@@ -311,10 +311,14 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  // Run reminder check every minute
-  setInterval(checkReminders, 60000);
-  // Run summary check every hour
-  setInterval(sendSummary, 3600000);
-});
+export default app;
+
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    // Run reminder check every minute
+    setInterval(checkReminders, 60000);
+    // Run summary check every hour
+    setInterval(sendSummary, 3600000);
+  });
+}
