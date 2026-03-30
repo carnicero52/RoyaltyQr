@@ -23,6 +23,16 @@ function getFirebaseConfig() {
   if (fs.existsSync(configPath)) {
     return JSON.parse(fs.readFileSync(configPath, "utf-8"));
   }
+  // Fallback to environment variables for Vercel
+  if (process.env.VITE_FIREBASE_API_KEY) {
+    return {
+      apiKey: process.env.VITE_FIREBASE_API_KEY,
+      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+      appId: process.env.VITE_FIREBASE_APP_ID,
+      firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID
+    };
+  }
   return null;
 }
 
@@ -40,7 +50,7 @@ async function getDb() {
 
   try {
     const firebaseApp = initializeApp(config);
-    db = getFirestore(firebaseApp, config.firestoreDatabaseId);
+    db = getFirestore(firebaseApp, config.firestoreDatabaseId || config.projectId);
     console.log("Client SDK SUCCESS: Connection verified.");
     return db;
   } catch (error) {
