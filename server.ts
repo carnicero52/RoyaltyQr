@@ -19,11 +19,7 @@ app.use(express.json());
 
 // Helper to get Firebase config
 function getFirebaseConfig() {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    return JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  }
-  // Fallback to environment variables for Vercel
+  // Try environment variables first (preferred for Vercel)
   if (process.env.VITE_FIREBASE_API_KEY) {
     return {
       apiKey: process.env.VITE_FIREBASE_API_KEY,
@@ -33,6 +29,17 @@ function getFirebaseConfig() {
       firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID
     };
   }
+
+  // Fallback to local file
+  try {
+    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    }
+  } catch (err) {
+    console.error("Error reading firebase-applet-config.json:", err);
+  }
+  
   return null;
 }
 
@@ -43,14 +50,19 @@ async function getDb() {
   if (db) return db;
 
   const config = getFirebaseConfig();
-  if (!config) {
-    console.error("Firebase config not found!");
+  if (!config || !config.apiKey) {
+    console.error("Firebase config not found or incomplete!", config);
     return null;
   }
 
   try {
     const firebaseApp = initializeApp(config);
-    db = getFirestore(firebaseApp, config.firestoreDatabaseId || config.projectId);
+    // Use the database ID if provided, otherwise default
+    const dbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== "(default)" 
+      ? config.firestoreDatabaseId 
+      : undefined;
+    
+    db = dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
     console.log("Client SDK SUCCESS: Connection verified.");
     return db;
   } catch (error) {
@@ -198,22 +210,48 @@ async function checkReminders() {
 }
 
 // API Routes
+app.get("/api/ping", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    time: new Date().toISOString(),
+    env: {
+      hasApiKey: !!process.env.VITE_FIREBASE_API_KEY,
+      nodeEnv: process.env.NODE_ENV,
+      isVercel: !!process.env.VERCEL
+    }
+  });
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", sdk: "client" });
 });
 
 app.get("/api/test-db", async (req, res) => {
   try {
+    console.log("[API/TestDB] Initializing DB...");
     const firestore = await getDb();
-    if (!firestore) return res.status(500).json({ error: "DB not initialized" });
+    if (!firestore) {
+      console.error("[API/TestDB] DB initialization failed");
+      return res.status(500).json({ 
+        error: "DB not initialized", 
+        details: "Check server logs for initialization errors",
+        hasEnv: !!process.env.VITE_FIREBASE_API_KEY
+      });
+    }
 
+    console.log("[API/TestDB] Fetching businesses...");
     const businessesRef = collection(firestore, "businesses");
     const snapshot = await getDocs(businessesRef);
     const businesses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     
+    console.log(`[API/TestDB] Success: Found ${businesses.length} businesses`);
     res.json({ success: true, count: businesses.length, data: businesses });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error("[API/TestDB] Fatal error:", error);
+    res.status(500).json({ 
+      error: error.message, 
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined 
+    });
   }
 });
 
@@ -320,6 +358,16 @@ if (process.env.NODE_ENV === "production") {
     res.sendFile(path.join(distPath, "index.html"));
   });
 }
+
+// Global error handler
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({
+    error: "Internal Server Error",
+    message: err.message,
+    path: req.path
+  });
+});
 
 export default app;
 

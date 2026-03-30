@@ -360,12 +360,19 @@ export default function AdminPanel() {
       const url = `${window.location.origin}/api/test-db`;
       console.log("Testing DB connection to:", url);
       const response = await fetch(url);
-      const data = await response.json();
       
-      if (response.ok && data.success) {
-        alert(`Conexión exitosa a Firestore.\nProyecto: ${data.projectId}\nDocumentos encontrados: ${data.count}`);
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        const data = await response.json();
+        if (response.ok && data.success) {
+          alert(`Conexión exitosa a Firestore.\nDocumentos encontrados: ${data.count}`);
+        } else {
+          alert(`Error de base de datos: ${data.error || "Error desconocido"}`);
+        }
       } else {
-        alert(`Error de base de datos: ${data.error || "Error desconocido"}`);
+        const text = await response.text();
+        console.error("Non-JSON response:", text);
+        alert(`Error del servidor (no JSON): ${response.status} ${response.statusText}\n\n${text.substring(0, 200)}...`);
       }
     } catch (err: any) {
       alert(`Error de red: ${err.message}\nVerifica que el servidor esté corriendo.`);
