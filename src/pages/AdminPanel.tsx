@@ -113,6 +113,8 @@ export default function AdminPanel() {
 
   const [lastRefresh, setLastRefresh] = useState(new Date());
 
+  const [userRole, setUserRole] = useState<'owner' | 'staff' | null>(null);
+
   useEffect(() => {
     const interval = setInterval(() => {
       setLastRefresh(new Date());
@@ -121,34 +123,60 @@ export default function AdminPanel() {
   }, []);
 
   useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid || !businessId) return;
+    const user = auth.currentUser;
+    if (!user || !businessId) return;
 
     // Real-time Business Config
-    const unsubBusiness = onSnapshot(doc(db, "businesses", businessId), async (docSnap) => {
-      if (docSnap.exists()) {
-        const data = { id: docSnap.id, ...docSnap.data() } as Business;
-        // Verify ownership (Firestore rules will also block, but UI should handle)
-        if (data.ownerUid !== uid) {
-          console.error("No tienes permiso para acceder a este negocio");
+    const unsubBusiness = onSnapshot(doc(db, "businesses", businessId), (docSnap) => {
+      const processBusiness = async () => {
+        if (docSnap.exists()) {
+          const data = { id: docSnap.id, ...docSnap.data() } as Business;
+          
+          // Check if owner
+          if (data.ownerUid === user.uid) {
+            setUserRole('owner');
+            setBusiness(data);
+          } else {
+            // Check if staff - Use getDoc directly as we use email as ID
+            try {
+              const staffDocRef = doc(db, "businesses", businessId, "staff", user.email?.toLowerCase() || "");
+              const staffSnap = await getDoc(staffDocRef);
+              
+              if (staffSnap.exists()) {
+                setUserRole('staff');
+                setBusiness(data);
+              } else {
+                console.error("No tienes permiso para acceder a este negocio");
+                navigate("/dashboard");
+                return;
+              }
+            } catch (err) {
+              console.error("Error verifying staff status:", err);
+              handleFirestoreError(err, OperationType.GET, `businesses/${businessId}/staff/${user.email}`);
+              navigate("/dashboard");
+              return;
+            }
+          }
+          
+          // Update initial scheduledAt if it hasn't been touched
+          if (!hasInitializedForm.current) {
+            setReminderForm(prev => ({
+              ...prev,
+              scheduledAt: formatInTimeZone(new Date(), data.timezone || "America/Caracas", "yyyy-MM-dd'T'HH:mm")
+            }));
+            hasInitializedForm.current = true;
+          }
+        } else {
+          console.error("Negocio no encontrado");
           navigate("/dashboard");
-          return;
         }
-        setBusiness(data);
-        
-        // Update initial scheduledAt if it hasn't been touched
-        if (!hasInitializedForm.current) {
-          setReminderForm(prev => ({
-            ...prev,
-            scheduledAt: formatInTimeZone(new Date(), data.timezone || "America/Caracas", "yyyy-MM-dd'T'HH:mm")
-          }));
-          hasInitializedForm.current = true;
-        }
-      } else {
-        console.error("Negocio no encontrado");
-        navigate("/dashboard");
-      }
-      setLoading(false);
+        setLoading(false);
+      };
+
+      processBusiness().catch(err => {
+        console.error("Error processing business snapshot:", err);
+        handleFirestoreError(err, OperationType.GET, `businesses/${businessId}`);
+      });
     }, (err) => {
       console.error("Error loading business:", err);
       handleFirestoreError(err, OperationType.GET, `businesses/${businessId}`);
@@ -828,16 +856,18 @@ export default function AdminPanel() {
             <TrendingUp className="h-5 w-5" />
             <span className="font-medium">Resumen</span>
           </button>
-          <button
-            onClick={() => setActiveTab("config")}
-            className={cn(
-              "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "config" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
-            )}
-          >
-            <Settings className="h-5 w-5" />
-            <span className="font-medium">Configuración</span>
-          </button>
+          {userRole === 'owner' && (
+            <button
+              onClick={() => setActiveTab("config")}
+              className={cn(
+                "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
+                activeTab === "config" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
+              )}
+            >
+              <Settings className="h-5 w-5" />
+              <span className="font-medium">Configuración</span>
+            </button>
+          )}
           <button
             onClick={() => setActiveTab("rewards")}
             className={cn(
@@ -901,16 +931,18 @@ export default function AdminPanel() {
             <Megaphone className="h-5 w-5" />
             <span className="font-medium">Marketing</span>
           </button>
-          <button
-            onClick={() => setActiveTab("staff")}
-            className={cn(
-              "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
-              activeTab === "staff" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
-            )}
-          >
-            <Users className="h-5 w-5" />
-            <span className="font-medium">Equipo</span>
-          </button>
+          {userRole === 'owner' && (
+            <button
+              onClick={() => setActiveTab("staff")}
+              className={cn(
+                "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all",
+                activeTab === "staff" ? "bg-orange-50 text-orange-600" : (business?.darkModeEnabled ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-50")
+              )}
+            >
+              <Users className="h-5 w-5" />
+              <span className="font-medium">Equipo</span>
+            </button>
+          )}
         </nav>
 
         <div className="p-4 border-t border-gray-100">
@@ -945,13 +977,13 @@ export default function AdminPanel() {
           </div>
           <div className="flex space-x-2">
              <button onClick={() => setActiveTab("overview")} className={cn("p-2 rounded-lg", activeTab === "overview" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><TrendingUp className="h-5 w-5" /></button>
-             <button onClick={() => setActiveTab("config")} className={cn("p-2 rounded-lg", activeTab === "config" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Settings className="h-5 w-5" /></button>
+             {userRole === 'owner' && <button onClick={() => setActiveTab("config")} className={cn("p-2 rounded-lg", activeTab === "config" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Settings className="h-5 w-5" /></button>}
              <button onClick={() => setActiveTab("customers")} className={cn("p-2 rounded-lg", activeTab === "customers" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Users className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("qr")} className={cn("p-2 rounded-lg", activeTab === "qr" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><QrCode className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("stats")} className={cn("p-2 rounded-lg", activeTab === "stats" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><BarChart3 className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("billing")} className={cn("p-2 rounded-lg", activeTab === "billing" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><CreditCard className="h-5 w-5" /></button>
              <button onClick={() => setActiveTab("marketing")} className={cn("p-2 rounded-lg", activeTab === "marketing" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Megaphone className="h-5 w-5" /></button>
-             <button onClick={() => setActiveTab("staff")} className={cn("p-2 rounded-lg", activeTab === "staff" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Users className="h-5 w-5" /></button>
+             {userRole === 'owner' && <button onClick={() => setActiveTab("staff")} className={cn("p-2 rounded-lg", activeTab === "staff" ? "bg-orange-50 text-orange-600" : "text-gray-400")}><Users className="h-5 w-5" /></button>}
              <button onClick={() => auth.signOut()} className="p-2 rounded-lg text-red-400"><LogOut className="h-5 w-5" /></button>
           </div>
         </header>
@@ -2734,12 +2766,15 @@ export default function AdminPanel() {
                     const name = prompt("Nombre del empleado:");
                     if (email && name) {
                       try {
-                        await addDoc(collection(db, "businesses", business.id, "staff"), {
-                          email,
+                        // Use email as ID for easier security rules
+                        await setDoc(doc(db, "businesses", business.id, "staff", email.toLowerCase()), {
+                          email: email.toLowerCase(),
                           name,
                           role: 'staff',
-                          businessId: business.id
+                          businessId: business.id,
+                          createdAt: new Date().toISOString()
                         });
+                        setStatus({ message: "Empleado añadido con éxito", type: 'success' });
                       } catch (err) {
                         handleFirestoreError(err, OperationType.CREATE, `businesses/${business.id}/staff`);
                       }

@@ -1,8 +1,80 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(businessId) {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid;
+    }
+    
+    function isStaff(businessId) {
+      return isAuthenticated() && 
+        'email' in request.auth.token &&
+        exists(/databases/$(database)/documents/businesses/$(businessId)/staff/$(request.auth.token.email.lower()));
+    }
+
+    function canManageBusiness(businessId) {
+      return isOwner(businessId) || isStaff(businessId);
+    }
+
+    // Businesses Collection
+    match /businesses/{businessId} {
+      // Publicly readable for the customer panel
+      allow read: if true;
+      // Only owner can create/update/delete business config
+      allow write: if isAuthenticated() && (
+        (request.method == 'create' && request.resource.data.ownerUid == request.auth.uid) ||
+        (request.method == 'update' && resource.data.ownerUid == request.auth.uid) ||
+        (request.method == 'delete' && resource.data.ownerUid == request.auth.uid)
+      );
+
+      // Customers Subcollection
+      match /customers/{customerId} {
+        // Allow get for PublicPanel identification
+        allow get: if true;
+        // Allow update for PublicPanel purchase registration (stamps)
+        // Restrict to only updating couponsCount and lastPurchaseAt
+        allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['couponsCount', 'lastPurchaseAt']) || canManageBusiness(businessId);
+        // Allow full access for managers
+        allow read, write: if canManageBusiness(businessId);
+      }
+
+      // Purchases Subcollection
+      match /purchases/{purchaseId} {
+        // Allow create for PublicPanel
+        allow create: if true;
+        // Allow full access for managers
+        allow read, write: if canManageBusiness(businessId);
+      }
+
+      // Staff Subcollection
+      match /staff/{staffEmail} {
+        // Owner can manage all staff
+        // Staff can read their own document to verify access
+        allow read: if isOwner(businessId) || (isAuthenticated() && 'email' in request.auth.token && request.auth.token.email.lower() == staffEmail.lower());
+        allow write: if isOwner(businessId);
+      }
+    }
+
+    // Reminders Collection (Top-level)
+    match /reminders/{reminderId} {
+      // Allow read if user is owner or staff of the business
+      allow read: if isAuthenticated() && (
+        isOwner(resource.data.businessId) || isStaff(resource.data.businessId)
+      );
+      // Allow create if user is owner or staff of the business
+      allow create: if isAuthenticated() && (
+        isOwner(request.resource.data.businessId) || isStaff(request.resource.data.businessId)
+      );
+      // Allow update/delete if user is owner or staff of the business
+      allow update, delete: if isAuthenticated() && (
+        isOwner(resource.data.businessId) || isStaff(resource.data.businessId)
+      );
     }
   }
 }
