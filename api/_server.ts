@@ -23,35 +23,32 @@ app.use(express.json());
 
 // Helper to get Firebase config
 function getFirebaseConfig() {
-  // Try environment variables first (preferred for Vercel)
-  const apiKey = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY;
-  console.log("[Firebase/Config] Checking environment variables... API Key found:", !!apiKey);
-  
-  if (apiKey) {
-    return {
-      apiKey: apiKey,
-      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN,
-      projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID,
-      appId: process.env.VITE_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID,
-      firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID
-    };
-  }
-
-  // Fallback to local file
+  // Load local config as base
+  let localConfig: any = {};
   try {
     const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-    console.log("[Firebase/Config] Checking local file at:", configPath);
     if (fs.existsSync(configPath)) {
-      console.log("[Firebase/Config] Found firebase-applet-config.json");
-      return JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    } else {
-      console.warn("[Firebase/Config] firebase-applet-config.json NOT found at:", configPath);
+      localConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      console.log("[Firebase/Config] Loaded local config from:", configPath);
     }
   } catch (err) {
-    console.error("[Firebase/Config] Error reading firebase-applet-config.json:", err);
+    console.error("[Firebase/Config] Error reading local config:", err);
   }
-  
-  return null;
+
+  // Override with environment variables
+  const config = {
+    apiKey: process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || localConfig.apiKey,
+    authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN || localConfig.authDomain,
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || localConfig.projectId,
+    appId: process.env.VITE_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID || localConfig.appId,
+    firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || localConfig.firestoreDatabaseId
+  };
+
+  console.log("[Firebase/Config] Config resolved. API Key present:", !!config.apiKey);
+  console.log("[Firebase/Config] Project ID:", config.projectId);
+  console.log("[Firebase/Config] Database ID:", config.firestoreDatabaseId || "(default)");
+
+  return config.apiKey ? config : null;
 }
 
 // Initialize Firebase Client SDK
