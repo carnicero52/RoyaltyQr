@@ -20,24 +20,31 @@ app.use(express.json());
 // Helper to get Firebase config
 function getFirebaseConfig() {
   // Try environment variables first (preferred for Vercel)
-  if (process.env.VITE_FIREBASE_API_KEY) {
+  const apiKey = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY;
+  console.log("[Firebase/Config] Checking environment variables... API Key found:", !!apiKey);
+  
+  if (apiKey) {
     return {
-      apiKey: process.env.VITE_FIREBASE_API_KEY,
-      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
-      projectId: process.env.VITE_FIREBASE_PROJECT_ID,
-      appId: process.env.VITE_FIREBASE_APP_ID,
-      firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID
+      apiKey: apiKey,
+      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID,
+      appId: process.env.VITE_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID,
+      firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID
     };
   }
 
   // Fallback to local file
   try {
     const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+    console.log("[Firebase/Config] Checking local file at:", configPath);
     if (fs.existsSync(configPath)) {
+      console.log("[Firebase/Config] Found firebase-applet-config.json");
       return JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    } else {
+      console.warn("[Firebase/Config] firebase-applet-config.json NOT found at:", configPath);
     }
   } catch (err) {
-    console.error("Error reading firebase-applet-config.json:", err);
+    console.error("[Firebase/Config] Error reading firebase-applet-config.json:", err);
   }
   
   return null;
@@ -51,22 +58,24 @@ async function getDb() {
 
   const config = getFirebaseConfig();
   if (!config || !config.apiKey) {
-    console.error("Firebase config not found or incomplete!", config);
+    console.error("[Firebase/Server] Firebase config not found or incomplete!", config);
     return null;
   }
 
   try {
+    console.log("[Firebase/Server] Initializing Firebase with project:", config.projectId);
     const firebaseApp = initializeApp(config);
     // Use the database ID if provided, otherwise default
-    const dbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== "(default)" 
+    const dbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== "(default)" && config.firestoreDatabaseId !== ""
       ? config.firestoreDatabaseId 
       : undefined;
     
+    console.log("[Firebase/Server] Using database ID:", dbId || "(default)");
     db = dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
-    console.log("Client SDK SUCCESS: Connection verified.");
+    console.log("[Firebase/Server] Client SDK SUCCESS: Connection verified.");
     return db;
   } catch (error) {
-    console.error("Error initializing Client SDK:", error);
+    console.error("[Firebase/Server] Error initializing Client SDK:", error);
     return null;
   }
 }

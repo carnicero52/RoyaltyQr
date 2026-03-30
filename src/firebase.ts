@@ -16,10 +16,15 @@ const firebaseConfig = {
 // We'll log a warning, but the app might still try to load.
 if (!firebaseConfig.apiKey) {
   console.warn("Firebase configuration missing! Ensure environment variables are set.");
+  console.log("Environment variables found:", Object.keys(import.meta.env).filter(k => k.startsWith('VITE_')));
+} else {
+  console.log("Firebase initialized with project:", firebaseConfig.projectId);
+  console.log("Firestore Database ID:", firebaseConfig.firestoreDatabaseId || "(default)");
 }
 
 const app = initializeApp(firebaseConfig);
-const dbId = firebaseConfig.firestoreDatabaseId || firebaseConfig.projectId;
-export const db = (dbId && dbId !== "(default)") ? getFirestore(app, dbId) : getFirestore(app);
+const dbId = firebaseConfig.firestoreDatabaseId;
+export const db = (dbId && dbId !== "(default)" && dbId !== "") ? getFirestore(app, dbId) : getFirestore(app);
+console.log("Firestore instance initialized:", db ? "Success" : "Failed");
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

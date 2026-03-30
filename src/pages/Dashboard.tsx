@@ -3,7 +3,7 @@ import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'fire
 import { db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Store, ChevronRight, LogOut, Settings, User } from 'lucide-react';
+import { Plus, Store, ChevronRight, LogOut, Settings, User, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
@@ -21,6 +21,7 @@ const Dashboard: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newBusinessName, setNewBusinessName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -41,9 +42,10 @@ const Dashboard: React.FC = () => {
           ...doc.data()
         })) as Business[];
         setBusinesses(list);
-      } catch (error) {
-        console.error('Error fetching businesses:', error);
-        handleFirestoreError(error, OperationType.LIST, 'businesses');
+        setError(null);
+      } catch (err: any) {
+        console.error('Error fetching businesses:', err);
+        setError(`Error al cargar negocios: ${err.message}`);
       } finally {
         setLoading(false);
       }
@@ -57,7 +59,9 @@ const Dashboard: React.FC = () => {
     if (!user || !newBusinessName.trim()) return;
 
     setCreating(true);
+    setError(null);
     try {
+      console.log("Attempting to create business:", newBusinessName);
       const docRef = await addDoc(collection(db, 'businesses'), {
         name: newBusinessName,
         ownerUid: user.uid,
@@ -74,10 +78,13 @@ const Dashboard: React.FC = () => {
         slogan: '¡Fideliza a tus clientes!',
         description: 'Programa de recompensas para clientes frecuentes.'
       });
+      console.log("Business created successfully with ID:", docRef.id);
       navigate(`/admin/${docRef.id}`);
-    } catch (error) {
-      console.error('Error creating business:', error);
-      handleFirestoreError(error, OperationType.CREATE, 'businesses');
+    } catch (err: any) {
+      console.error('Error creating business:', err);
+      // Log the full error object for debugging
+      console.log("Full error object:", JSON.stringify(err, null, 2));
+      setError(`Error al crear negocio: ${err.message}`);
     } finally {
       setCreating(false);
     }
@@ -125,6 +132,12 @@ const Dashboard: React.FC = () => {
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-12">
+        {error && (
+          <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+            {error}
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Create New Card */}
           <button
