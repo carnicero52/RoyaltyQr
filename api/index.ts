@@ -27,7 +27,28 @@ export default async function handler(req: any, res: any) {
 
     // Dynamic import to catch top-level errors in server.ts
     console.log("[Vercel/API] Importing server.ts...");
-    const { default: app } = await import("../server");
+    let serverModule;
+    try {
+      serverModule = await import("./server");
+    } catch (importError: any) {
+      console.error("[Vercel/API] Failed to import server.ts:", importError);
+      return res.status(500).json({
+        error: "Failed to load server logic",
+        message: importError.message,
+        stack: importError.stack,
+        path: "./server"
+      });
+    }
+
+    const app = serverModule.default;
+    if (!app) {
+      console.error("[Vercel/API] server.ts does not have a default export");
+      return res.status(500).json({
+        error: "Invalid server configuration",
+        message: "The server module does not export a default Express app."
+      });
+    }
+
     console.log("[Vercel/API] server.ts imported successfully");
     
     // Pass to Express app
@@ -35,7 +56,7 @@ export default async function handler(req: any, res: any) {
   } catch (error: any) {
     console.error("[Vercel/API] Fatal error in API entry point:", error);
     res.status(500).json({ 
-      error: "Internal Server Error during initialization", 
+      error: `Internal Server Error: ${error.message}`, 
       message: error.message,
       stack: error.stack,
       hint: "Check if all dependencies are correctly installed and environment variables are set."

@@ -367,7 +367,7 @@ export default function AdminPanel() {
         if (response.ok && data.success) {
           alert(`Conexión exitosa a Firestore.\nDocumentos encontrados: ${data.count}`);
         } else {
-          alert(`Error de base de datos: ${data.error || "Error desconocido"}`);
+          alert(`Error de base de datos: ${data.error || "Error desconocido"}\n\nDetalle: ${data.message || "Sin detalle"}`);
         }
       } else {
         const text = await response.text();

@@ -147,6 +147,11 @@ const Dashboard: React.FC = () => {
             <p>Project ID: {db.app.options.projectId}</p>
             <p>Database ID: {(db as any)._databaseId?.database || '(default)'}</p>
             <p>Auth Ready: {user ? 'Yes' : 'No'}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a href="/api/ping" target="_blank" className="px-2 py-1 bg-blue-500/20 rounded hover:bg-blue-500/30 transition-colors">Ping API</a>
+              <a href="/api/test-db" target="_blank" className="px-2 py-1 bg-blue-500/20 rounded hover:bg-blue-500/30 transition-colors">Test DB</a>
+              <a href="/api/test" target="_blank" className="px-2 py-1 bg-blue-500/20 rounded hover:bg-blue-500/30 transition-colors">Full Test</a>
+            </div>
           </div>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

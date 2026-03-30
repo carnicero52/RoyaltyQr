@@ -9,6 +9,10 @@ import fs from "fs";
 import cors from "cors";
 import { formatInTimeZone } from "date-fns-tz";
 
+console.log("[Server] Initializing server.ts module...");
+console.log("[Server] process.cwd():", process.cwd());
+console.log("[Server] __dirname:", typeof __dirname !== 'undefined' ? __dirname : 'undefined');
+
 dotenv.config();
 
 const app = express();
