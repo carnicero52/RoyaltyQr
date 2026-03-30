@@ -1,3 +1,7 @@
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+
 // Diagnostic route directly in the API entry point
 export default async function handler(req: any, res: any) {
   console.log(`[Vercel/API] Request received: ${req.method} ${req.url}`);
@@ -5,8 +9,6 @@ export default async function handler(req: any, res: any) {
   try {
     // Diagnostic route
     if (req.url === "/api/test") {
-      const fs = await import("fs");
-      const path = await import("path");
       const configPath = path.join(process.cwd(), "firebase-applet-config.json");
       const configExists = fs.existsSync(configPath);
       
@@ -25,18 +27,59 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // Dynamic import to catch top-level errors in server.ts
-    console.log("[Vercel/API] Importing server.ts...");
+    // Dynamic import to catch top-level errors in _server.ts
+    console.log("[Vercel/API] Importing _server.ts...");
     let serverModule;
     try {
-      serverModule = await import("./server");
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      
+      try {
+        console.log("[Vercel/API] CWD files:", fs.readdirSync(process.cwd()));
+        console.log("[Vercel/API] api/ files:", fs.readdirSync(path.join(process.cwd(), "api")));
+      } catch (e) {}
+
+      let serverPath = path.join(process.cwd(), "api", "_server.ts");
+      console.log("[Vercel/API] CWD path:", serverPath, "Exists:", fs.existsSync(serverPath));
+      
+      if (!fs.existsSync(serverPath)) {
+        const jsPath = serverPath.replace(".ts", ".js");
+        if (fs.existsSync(jsPath)) {
+          serverPath = jsPath;
+          console.log("[Vercel/API] Using .js path:", serverPath);
+        } else {
+          serverPath = path.join(__dirname, "_server.ts");
+          console.log("[Vercel/API] __dirname path:", serverPath, "Exists:", fs.existsSync(serverPath));
+          if (!fs.existsSync(serverPath)) {
+            const jsDirnamePath = serverPath.replace(".ts", ".js");
+            if (fs.existsSync(jsDirnamePath)) {
+              serverPath = jsDirnamePath;
+              console.log("[Vercel/API] Using __dirname .js path:", serverPath);
+            }
+          }
+        }
+      }
+
+      try {
+        // Try absolute path first
+        serverModule = await import(serverPath);
+      } catch (tsError: any) {
+        console.log("[Vercel/API] Failed to import absolute path, trying relative...");
+        try {
+          serverModule = await import("./_server");
+        } catch (jsError: any) {
+          console.log("[Vercel/API] All import attempts failed.");
+          throw new Error(`Failed to import server module: TS Error: ${tsError.message}, JS Error: ${jsError.message}`);
+        }
+      }
     } catch (importError: any) {
-      console.error("[Vercel/API] Failed to import server.ts:", importError);
+      console.error("[Vercel/API] Failed to import _server.ts:", importError);
       return res.status(500).json({
         error: "Failed to load server logic",
         message: importError.message,
         stack: importError.stack,
-        path: "./server"
+        path: "./_server",
+        cwd: process.cwd()
       });
     }
 
