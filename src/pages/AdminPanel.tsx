@@ -364,10 +364,10 @@ export default function AdminPanel() {
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("application/json")) {
         const data = await response.json();
-        if (response.ok && data.success) {
-          alert(`Conexión exitosa a Firestore.\nDocumentos encontrados: ${data.count}`);
+        if (response.ok && (data.success || data.status === "ok")) {
+          alert(`Conexión exitosa a Firestore.\nDocumentos encontrados: ${data.count || 0}`);
         } else {
-          alert(`Error de base de datos: ${data.error || "Error desconocido"}\n\nDetalle: ${data.message || "Sin detalle"}`);
+          alert(`Error de base de datos: ${data.error || "Error desconocido"}\n\nDetalle: ${data.message || data.details || "Sin detalle"}`);
         }
       } else {
         const text = await response.text();

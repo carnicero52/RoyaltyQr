@@ -264,6 +264,7 @@ app.get("/api/test-db", async (req, res) => {
     console.log("[API/TestDB] Found businesses:", snapshot.size);
     
     res.json({ 
+      success: true,
       status: "ok", 
       db: dbInfo,
       count: snapshot.size,
