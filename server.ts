@@ -224,7 +224,9 @@ app.get("/api/ping", (req, res) => {
     status: "ok", 
     time: new Date().toISOString(),
     env: {
-      hasApiKey: !!process.env.VITE_FIREBASE_API_KEY,
+      hasApiKey: !!(process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY),
+      hasProjectId: !!(process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID),
+      hasDbId: !!(process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID),
       nodeEnv: process.env.NODE_ENV,
       isVercel: !!process.env.VERCEL
     }
@@ -244,22 +246,30 @@ app.get("/api/test-db", async (req, res) => {
       return res.status(500).json({ 
         error: "DB not initialized", 
         details: "Check server logs for initialization errors",
-        hasEnv: !!process.env.VITE_FIREBASE_API_KEY
+        hasEnv: !!(process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY)
       });
     }
 
-    console.log("[API/TestDB] Fetching businesses...");
-    const businessesRef = collection(firestore, "businesses");
-    const snapshot = await getDocs(businessesRef);
-    const businesses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const dbInfo = {
+      projectId: firestore.app.options.projectId,
+      databaseId: (firestore as any)._databaseId?.database || "(default)"
+    };
     
-    console.log(`[API/TestDB] Success: Found ${businesses.length} businesses`);
-    res.json({ success: true, count: businesses.length, data: businesses });
+    console.log("[API/TestDB] Fetching businesses...");
+    const snapshot = await getDocs(collection(firestore, "businesses"));
+    console.log("[API/TestDB] Found businesses:", snapshot.size);
+    
+    res.json({ 
+      status: "ok", 
+      db: dbInfo,
+      count: snapshot.size,
+      businesses: snapshot.docs.map(d => ({ id: d.id, name: d.data().name }))
+    });
   } catch (error: any) {
-    console.error("[API/TestDB] Fatal error:", error);
+    console.error("[API/TestDB] Error:", error);
     res.status(500).json({ 
-      error: error.message, 
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });

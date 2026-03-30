@@ -5,12 +5,21 @@ export default async function handler(req: any, res: any) {
   try {
     // Diagnostic route
     if (req.url === "/api/test") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+      const configExists = fs.existsSync(configPath);
+      
       return res.json({ 
         message: "API entry point reached", 
         time: new Date().toISOString(),
         vercel: !!process.env.VERCEL,
+        cwd: process.cwd(),
+        configExists,
         env: {
-          hasFirebaseKey: !!process.env.VITE_FIREBASE_API_KEY,
+          hasFirebaseKey: !!(process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY),
+          hasProjectId: !!(process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID),
+          hasDbId: !!(process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID),
           nodeEnv: process.env.NODE_ENV
         }
       });

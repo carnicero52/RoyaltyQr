@@ -138,6 +138,17 @@ const Dashboard: React.FC = () => {
             {error}
           </div>
         )}
+
+        {/* Debug Info - Only visible for the developer email */}
+        {auth.currentUser?.email === 'marcorodolfo40@gmail.com' && (
+          <div className="mb-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-400 text-xs font-mono flex flex-col gap-1">
+            <p className="font-bold mb-1">Debug Info:</p>
+            <p>User UID: {auth.currentUser?.uid}</p>
+            <p>Project ID: {db.app.options.projectId}</p>
+            <p>Database ID: {(db as any)._databaseId?.database || '(default)'}</p>
+            <p>Auth Ready: {auth.currentUser ? 'Yes' : 'No'}</p>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Create New Card */}
           <button

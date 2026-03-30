@@ -2,14 +2,19 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
+// Try to import local config if it exists using Vite's eager glob.
+// This ensures it's available synchronously for initializeApp.
+const configs = import.meta.glob('../firebase-applet-config.json', { eager: true });
+const localConfig: any = configs['../firebase-applet-config.json'] || (configs['../firebase-applet-config.json'] as any)?.default || {};
+
 // In Vercel/Production, we use environment variables.
 // In local development, we might have the config file, but we'll prefer env vars if present.
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || localConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || localConfig.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || localConfig.projectId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || localConfig.appId,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID || localConfig.firestoreDatabaseId
 };
 
 // If environment variables are missing, we can't initialize Firebase.
