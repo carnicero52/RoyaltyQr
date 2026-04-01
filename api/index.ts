@@ -39,7 +39,7 @@ export default async function handler(req: any, res: any) {
         console.log("[Vercel/API] api/ files:", fs.readdirSync(path.join(process.cwd(), "api")));
       } catch (e) {}
 
-      let serverPath = path.join(process.cwd(), "api", "_server.ts");
+      let serverPath = path.join(process.cwd(), "server.ts");
       console.log("[Vercel/API] CWD path:", serverPath, "Exists:", fs.existsSync(serverPath));
       
       if (!fs.existsSync(serverPath)) {
@@ -48,7 +48,7 @@ export default async function handler(req: any, res: any) {
           serverPath = jsPath;
           console.log("[Vercel/API] Using .js path:", serverPath);
         } else {
-          serverPath = path.join(__dirname, "_server.ts");
+          serverPath = path.join(__dirname, "..", "server.ts");
           console.log("[Vercel/API] __dirname path:", serverPath, "Exists:", fs.existsSync(serverPath));
           if (!fs.existsSync(serverPath)) {
             const jsDirnamePath = serverPath.replace(".ts", ".js");
@@ -66,7 +66,7 @@ export default async function handler(req: any, res: any) {
       } catch (tsError: any) {
         console.log("[Vercel/API] Failed to import absolute path, trying relative...");
         try {
-          serverModule = await import("./_server");
+          serverModule = await import("../server");
         } catch (jsError: any) {
           console.log("[Vercel/API] All import attempts failed.");
           throw new Error(`Failed to import server module: TS Error: ${tsError.message}, JS Error: ${jsError.message}`);
@@ -78,7 +78,7 @@ export default async function handler(req: any, res: any) {
         error: "Failed to load server logic",
         message: importError.message,
         stack: importError.stack,
-        path: "./_server",
+        path: "../server",
         cwd: process.cwd()
       });
     }

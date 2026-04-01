@@ -7,15 +7,22 @@ service cloud.firestore {
       return request.auth != null;
     }
     
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "marcorodolfo40@gmail.com" && request.auth.token.email_verified == true) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+    
     function isOwner(businessId) {
-      return isAuthenticated() && 
-        get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid;
+      return isAdmin() || (isAuthenticated() && 
+        get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid);
     }
     
     function isStaff(businessId) {
-      return isAuthenticated() && 
+      return isAdmin() || (isAuthenticated() && 
         'email' in request.auth.token &&
-        exists(/databases/$(database)/documents/businesses/$(businessId)/staff/$(request.auth.token.email.lower()));
+        exists(/databases/$(database)/documents/businesses/$(businessId)/staff/$(request.auth.token.email.lower())));
     }
 
     function canManageBusiness(businessId) {

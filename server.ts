@@ -1,19 +1,6 @@
 import express from "express";
-import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
-import { 
-  getFirestore, 
-  collection, 
-  getDocs, 
-  doc, 
-  getDoc, 
-  query, 
-  where, 
-  updateDoc, 
-  serverTimestamp, 
-  writeBatch,
-  Firestore,
-  Timestamp
-} from "firebase/firestore";
+import { initializeApp, getApps, getApp } from "firebase-admin/app";
+import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
 import nodemailer from "nodemailer";
 import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
@@ -22,11 +9,10 @@ import fs from "fs";
 import cors from "cors";
 import { formatInTimeZone } from "date-fns-tz";
 
-console.log("[Server] Initializing server.ts module...");
-console.log("[Server] process.cwd():", process.cwd());
-console.log("[Server] __dirname:", typeof __dirname !== 'undefined' ? __dirname : 'undefined');
+import { initializeApp as initializeClientApp, getApps as getClientApps, getApp as getClientApp } from "firebase/app";
+import { getFirestore as getClientFirestore, collection, query, where, getDocs, updateDoc, doc, serverTimestamp, getDoc, limit as clientLimit } from "firebase/firestore";
 
-dotenv.config();
+console.log("[Server] Initializing server.ts module...");
 
 const app = express();
 const PORT = 3000;
@@ -36,68 +22,174 @@ app.use(express.json());
 
 // Helper to get Firebase config
 function getFirebaseConfig() {
-  // Load local config as base
+  console.log("[Firebase/Config] Checking environment variables...");
+  console.log("[Firebase/Config] VITE_FIREBASE_PROJECT_ID:", process.env.VITE_FIREBASE_PROJECT_ID);
+  console.log("[Firebase/Config] FIREBASE_PROJECT_ID:", process.env.FIREBASE_PROJECT_ID);
+  console.log("[Firebase/Config] GOOGLE_CLOUD_PROJECT:", process.env.GOOGLE_CLOUD_PROJECT);
+
   let localConfig: any = {};
   try {
     const configPath = path.join(process.cwd(), "firebase-applet-config.json");
     if (fs.existsSync(configPath)) {
       localConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      console.log("[Firebase/Config] Loaded local config from:", configPath);
+      console.log("[Firebase/Config] Loaded local config:", {
+        projectId: localConfig.projectId,
+        firestoreDatabaseId: localConfig.firestoreDatabaseId
+      });
     }
   } catch (err) {
     console.error("[Firebase/Config] Error reading local config:", err);
   }
 
-  // Override with environment variables
   const config = {
-    apiKey: process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || localConfig.apiKey,
-    authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN || localConfig.authDomain,
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || localConfig.projectId,
-    appId: process.env.VITE_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID || localConfig.appId,
-    firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID || localConfig.firestoreDatabaseId
+    projectId: localConfig.projectId || process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
+    firestoreDatabaseId: localConfig.firestoreDatabaseId || process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID,
+    apiKey: localConfig.apiKey || process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY,
+    authDomain: localConfig.authDomain || process.env.VITE_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN,
+    appId: localConfig.appId || process.env.VITE_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID,
+    storageBucket: localConfig.storageBucket || process.env.VITE_FIREBASE_STORAGE_BUCKET || process.env.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: localConfig.messagingSenderId || process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || process.env.FIREBASE_MESSAGING_SENDER_ID
   };
 
-  console.log("[Firebase/Config] Config resolved. Project ID:", config.projectId);
-  console.log("[Firebase/Config] Database ID:", config.firestoreDatabaseId || "(default)");
-
+  console.log("[Firebase/Config] Final resolved config:", {
+    ...config,
+    apiKey: config.apiKey ? "***" : undefined
+  });
+  if (!config.projectId) {
+    console.error("[Firebase/Config] No project ID found in local config or environment variables!");
+  }
   return config.projectId ? config : null;
 }
 
-// Initialize Firebase Client SDK
-let db: Firestore | null = null;
+// Initialize Firebase SDKs
+let dbPromise: Promise<any> | null = null;
 
 async function getDb() {
-  if (db) return db;
+  if (dbPromise) return dbPromise;
 
-  const config = getFirebaseConfig();
-  if (!config || !config.apiKey) {
-    console.error("[Firebase/Client] Firebase config not found or incomplete!", config);
-    return null;
-  }
-
-  try {
-    console.log("[Firebase/Client] Initializing Client SDK with project:", config.projectId);
-    
-    let clientApp: FirebaseApp;
-    const apps = getApps() || [];
-    if (apps.length === 0) {
-      clientApp = initializeApp(config);
-    } else {
-      clientApp = getApp();
+  dbPromise = (async () => {
+    const config = getFirebaseConfig();
+    if (!config) {
+      console.error("[Firebase/Config] No config found, cannot initialize DB.");
+      dbPromise = null;
+      return null;
     }
-    
+
     const dbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== "(default)" && config.firestoreDatabaseId !== ""
       ? config.firestoreDatabaseId 
-      : undefined;
-    
-    console.log("[Firebase/Client] Using database ID:", dbId || "(default)");
-    db = dbId ? getFirestore(clientApp, dbId) : getFirestore(clientApp);
-    console.log("[Firebase/Client] Client SDK SUCCESS: Connection verified.");
-    return db;
-  } catch (error) {
-    console.error("[Firebase/Client] Error initializing Client SDK:", error);
-    return null;
+      : "(default)";
+
+    // In this environment, we prefer the Client SDK on the server because we have the apiKey
+    // and the Admin SDK often lacks service account credentials.
+    console.log("[Firebase/Init] Initializing Client SDK as primary...");
+    try {
+      const clientConfig = {
+        apiKey: config.apiKey,
+        authDomain: config.authDomain,
+        projectId: config.projectId,
+        appId: config.appId,
+        storageBucket: config.storageBucket,
+        messagingSenderId: config.messagingSenderId
+      };
+      
+      let clientApp;
+      if (getClientApps().length === 0) {
+        clientApp = initializeClientApp(clientConfig);
+      } else {
+        clientApp = getClientApp();
+      }
+      
+      const clientDb = (dbId && dbId !== "(default)") ? getClientFirestore(clientApp, dbId) : getClientFirestore(clientApp);
+      (clientDb as any).isClientSDK = true;
+      
+      // Test connection
+      console.log("[Firebase/Client] Testing connection...");
+      const testCol = collection(clientDb, "businesses");
+      const q = query(testCol, clientLimit(1));
+      await getDocs(q);
+      console.log("[Firebase/Client] Connection test SUCCESS.");
+      
+      return clientDb;
+    } catch (clientError: any) {
+      console.warn("[Firebase/Client] Client SDK failed, trying Admin SDK as backup:", clientError.message);
+      
+      try {
+        let adminApp;
+        if (getApps().length === 0) {
+          adminApp = initializeApp({
+            projectId: config.projectId
+          });
+        } else {
+          adminApp = getApp();
+        }
+        
+        const adminDb = getFirestore(adminApp, dbId === "(default)" ? undefined : dbId);
+        (adminDb as any).isClientSDK = false;
+        
+        console.log("[Firebase/Admin] Testing connection...");
+        await adminDb.collection("businesses").limit(1).get();
+        console.log("[Firebase/Admin] Admin SDK connection SUCCESS.");
+        
+        return adminDb;
+      } catch (adminError: any) {
+        console.error("[Firebase/Admin] Both SDKs failed to initialize/connect.");
+        dbPromise = null;
+        return null;
+      }
+    }
+  })();
+
+  return dbPromise;
+}
+
+// Firestore Helpers to handle both Admin and Client SDKs
+async function getCollection(path: string, db: any) {
+  if (db.isClientSDK) {
+    return collection(db, path);
   }
+  return db.collection(path);
+}
+
+async function getDocRef(collectionPath: string, docId: string, db: any) {
+  if (db.isClientSDK) {
+    return doc(db, collectionPath, docId);
+  }
+  return db.collection(collectionPath).doc(docId);
+}
+
+async function fetchDocs(ref: any, db: any) {
+  if (db.isClientSDK) {
+    const snap = await getDocs(ref);
+    return snap.docs;
+  }
+  const snap = await ref.get();
+  return snap.docs;
+}
+
+async function fetchDoc(ref: any, db: any) {
+  if (db.isClientSDK) {
+    const snap = await getDoc(ref);
+    return snap;
+  }
+  const snap = await ref.get();
+  return snap;
+}
+
+async function updateDocument(ref: any, data: any, db: any) {
+  if (db.isClientSDK) {
+    return await updateDoc(ref, data);
+  }
+  return await ref.update(data);
+}
+
+async function queryDocs(colRef: any, field: string, op: any, value: any, db: any) {
+  if (db.isClientSDK) {
+    const q = query(colRef, where(field, op, value));
+    const snap = await getDocs(q);
+    return snap.docs;
+  }
+  const snap = await colRef.where(field, op, value).get();
+  return snap.docs;
 }
 
 // Notification services
@@ -160,13 +252,19 @@ async function sendNotification(type: string, to: string, message: string, confi
 // Send summary to owner
 async function sendSummary() {
   console.log("[Cron] Checking daily summary...");
-  const firestore = await getDb();
-  if (!firestore) return;
-
   try {
-    const businessesSnap = await getDocs(collection(firestore, "businesses"));
+    const firestore = await getDb();
+    if (!firestore) {
+      console.error("[Cron] sendSummary: Firestore not initialized.");
+      return;
+    }
+
+    console.log(`[Cron] sendSummary: Using ${firestore.isClientSDK ? "Client" : "Admin"} SDK`);
+
+    const businessesCol = await getCollection("businesses", firestore);
+    const businessesDocs = await fetchDocs(businessesCol, firestore);
     
-    for (const bDoc of businessesSnap.docs) {
+    for (const bDoc of businessesDocs) {
       const business = bDoc.data();
       if (!business.notifySummary) continue;
 
@@ -176,9 +274,7 @@ async function sendSummary() {
       const minute = parseInt(nowInTz.split(":")[1]);
 
       // Send summary between 8:00 PM and 8:15 PM
-      // We use a range because the interval is 10 minutes
       if (hour === 20 && minute < 15) {
-        // Check if already sent today to avoid duplicates within the 15min window
         const lastSummaryKey = `last_summary_${bDoc.id}_${formatInTimeZone(new Date(), tz, "yyyy-MM-dd")}`;
         if ((global as any)[lastSummaryKey]) continue;
 
@@ -189,13 +285,13 @@ async function sendSummary() {
         today.setHours(0, 0, 0, 0);
         const todayIso = today.toISOString();
         
-        const q = query(
-          collection(firestore, "businesses", bDoc.id, "purchases"),
-          where("timestamp", ">=", todayIso)
-        );
-        const purchasesSnap = await getDocs(q);
+        const purchasesCol = firestore.isClientSDK 
+          ? collection(firestore, "businesses", bDoc.id, "purchases")
+          : firestore.collection("businesses").doc(bDoc.id).collection("purchases");
+        
+        const purchasesDocs = await queryDocs(purchasesCol, "timestamp", ">=", todayIso, firestore);
 
-        const count = purchasesSnap.size;
+        const count = purchasesDocs.length;
         const msg = `📊 Resumen Diario - ${business.name}\n\nTotal de compras hoy: ${count}\n¡Buen trabajo!`;
         
         if (business.notifyTelegram && business.telegramChatId) {
@@ -206,30 +302,36 @@ async function sendSummary() {
         }
       }
     }
-  } catch (error) {
-    console.error("[Cron] Error in sendSummary:", error);
+  } catch (error: any) {
+    console.error("[Cron] Error in sendSummary:", error.message || error);
+    if (error.stack) console.error(error.stack);
   }
 }
 
 // Check reminders
 async function checkReminders() {
   console.log("[Cron] Checking reminders...");
-  const firestore = await getDb();
-  if (!firestore) return;
-
   try {
+    const firestore = await getDb();
+    if (!firestore) {
+      console.error("[Cron] checkReminders: Firestore not initialized.");
+      return;
+    }
+
+    console.log(`[Cron] checkReminders: Using ${firestore.isClientSDK ? "Client" : "Admin"} SDK`);
+
     const now = new Date();
     
     // Get pending reminders
-    const q = query(collection(firestore, "reminders"), where("status", "==", "pending"));
-    const snapshot = await getDocs(q);
+    const remindersCol = await getCollection("reminders", firestore);
+    const pendingDocs = await queryDocs(remindersCol, "status", "==", "pending", firestore);
 
-    if (snapshot.empty) {
+    if (pendingDocs.length === 0) {
       console.log("[Cron] No pending reminders.");
       return;
     }
 
-    for (const docSnap of snapshot.docs) {
+    for (const docSnap of pendingDocs) {
       const reminderId = docSnap.id;
       if (processingReminders.has(reminderId)) continue;
       
@@ -259,7 +361,8 @@ async function checkReminders() {
 
         try {
           // Fetch business config
-          const businessSnap = await getDoc(doc(firestore, "businesses", reminder.businessId));
+          const businessRef = await getDocRef("businesses", reminder.businessId, firestore);
+          const businessSnap = await fetchDoc(businessRef, firestore);
           const business = businessSnap.data();
 
           if (!business) {
@@ -267,7 +370,10 @@ async function checkReminders() {
           }
 
           // Fetch customer data
-          const customerSnap = await getDoc(doc(firestore, "businesses", reminder.businessId, "customers", reminder.customerId));
+          const customerRef = firestore.isClientSDK 
+            ? doc(firestore, "businesses", reminder.businessId, "customers", reminder.customerId)
+            : firestore.collection("businesses").doc(reminder.businessId).collection("customers").doc(reminder.customerId);
+          const customerSnap = await fetchDoc(customerRef, firestore);
           const customer = customerSnap.data();
 
           if (!customer) {
@@ -297,11 +403,17 @@ async function checkReminders() {
 
           // Update reminder status
           const finalStatus = results.some(r => r.status === "success") ? "sent" : "failed";
-          await updateDoc(docSnap.ref, {
+          const updateData = {
             status: finalStatus,
-            sentAt: serverTimestamp(),
+            sentAt: firestore.isClientSDK ? serverTimestamp() : FieldValue.serverTimestamp(),
             results
-          });
+          };
+          
+          if (firestore.isClientSDK) {
+            await updateDoc(docSnap.ref as any, updateData);
+          } else {
+            await (docSnap.ref as any).update(updateData);
+          }
 
           // Notify admin if it failed
           if (finalStatus === "failed") {
@@ -312,17 +424,23 @@ async function checkReminders() {
 
         } catch (err: any) {
           console.error(`[Cron] Fatal error processing reminder ${reminderId}:`, err);
-          await updateDoc(docSnap.ref, {
+          const errorData = {
             status: "error",
             error: err.message
-          });
+          };
+          if (firestore.isClientSDK) {
+            await updateDoc(docSnap.ref as any, errorData);
+          } else {
+            await (docSnap.ref as any).update(errorData);
+          }
         } finally {
           processingReminders.delete(reminderId);
         }
       }
     }
-  } catch (error) {
-    console.error("[Cron] Error in checkReminders:", error);
+  } catch (error: any) {
+    console.error("[Cron] Error in checkReminders:", error.message || error);
+    if (error.stack) console.error(error.stack);
   }
 }
 
@@ -342,7 +460,7 @@ app.get("/api/ping", (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", sdk: "client" });
+  res.json({ status: "ok", sdk: "admin" });
 });
 
 app.get("/api/test-db", async (req, res) => {
@@ -352,32 +470,32 @@ app.get("/api/test-db", async (req, res) => {
     if (!firestore) {
       console.error("[API/TestDB] DB initialization failed");
       return res.status(500).json({ 
-        error: "DB not initialized", 
-        details: "Check server logs for initialization errors"
+        error: "DB not initialized"
       });
     }
 
     const dbInfo = {
-      projectId: getApp().options.projectId,
-      databaseId: (firestore as any).databaseId || "(default)"
+      projectId: firestore.isClientSDK ? firestore.app.options.projectId : getApp().options.projectId,
+      databaseId: firestore.databaseId || "(default)",
+      isClientSDK: firestore.isClientSDK
     };
     
     console.log("[API/TestDB] Fetching businesses...");
-    const snapshot = await getDocs(collection(firestore, "businesses"));
-    console.log("[API/TestDB] Found businesses:", snapshot.size);
+    const businessesCol = await getCollection("businesses", firestore);
+    const businessesDocs = await fetchDocs(businessesCol, firestore);
+    console.log("[API/TestDB] Found businesses:", businessesDocs.length);
     
     res.json({ 
       success: true,
       status: "ok", 
       db: dbInfo,
-      count: snapshot.size,
-      businesses: snapshot.docs.map(d => ({ id: d.id, name: d.data().name }))
+      count: businessesDocs.length,
+      businesses: businessesDocs.map(d => ({ id: d.id, name: d.data().name }))
     });
   } catch (error: any) {
     console.error("[API/TestDB] Error:", error);
     res.status(500).json({ 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message
     });
   }
 });
@@ -458,30 +576,55 @@ app.post("/api/clear-history/:type", async (req, res) => {
     if (!firestore) return res.status(500).json({ error: "DB not initialized" });
 
     let deletedCount = 0;
-
-    // Clear reminders of specific type for this business
-    const qReminders = query(collection(firestore, "reminders"), where("businessId", "==", businessId));
-    const snapshot = await getDocs(qReminders);
     
-    const batch = writeBatch(firestore);
-    snapshot.docs.forEach(docSnap => {
-      const data = docSnap.data();
-      if (data.type === type || (type === "billing" && !data.type)) {
-        batch.delete(docSnap.ref);
-        deletedCount++;
+    if (firestore.isClientSDK) {
+      // Client SDK doesn't have batch delete for collections easily without individual docs
+      // We'll do it sequentially for now as it's a "clear history" action
+      const remindersCol = collection(firestore, "reminders");
+      const q = query(remindersCol, where("businessId", "==", businessId));
+      const snapshot = await getDocs(q);
+      
+      const { deleteDoc } = await import("firebase/firestore");
+      
+      for (const docSnap of snapshot.docs) {
+        const data = docSnap.data();
+        if (data.type === type || (type === "billing" && !data.type)) {
+          await deleteDoc(docSnap.ref);
+          deletedCount++;
+        }
       }
-    });
 
-    // If billing, also clear purchases
-    if (type === "billing") {
-      const purchasesSnap = await getDocs(collection(firestore, "businesses", businessId, "purchases"));
-      purchasesSnap.docs.forEach(docSnap => {
-        batch.delete(docSnap.ref);
-        deletedCount++;
+      if (type === "billing") {
+        const purchasesCol = collection(firestore, "businesses", businessId, "purchases");
+        const purchasesSnap = await getDocs(purchasesCol);
+        for (const docSnap of purchasesSnap.docs) {
+          await deleteDoc(docSnap.ref);
+          deletedCount++;
+        }
+      }
+    } else {
+      const batch = firestore.batch();
+      const snapshot = await firestore.collection("reminders")
+        .where("businessId", "==", businessId)
+        .get();
+      
+      snapshot.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.type === type || (type === "billing" && !data.type)) {
+          batch.delete(docSnap.ref);
+          deletedCount++;
+        }
       });
-    }
 
-    await batch.commit();
+      if (type === "billing") {
+        const purchasesSnap = await firestore.collection("businesses").doc(businessId).collection("purchases").get();
+        purchasesSnap.docs.forEach(docSnap => {
+          batch.delete(docSnap.ref);
+          deletedCount++;
+        });
+      }
+      await batch.commit();
+    }
 
     res.json({ 
       success: true, 
@@ -489,7 +632,7 @@ app.post("/api/clear-history/:type", async (req, res) => {
       deleted: deletedCount 
     });
   } catch (error: any) {
-    console.error(`Error clearing ${type} history:`, error);
+    console.error(`[API/ClearHistory] Error clearing ${type} history:`, error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

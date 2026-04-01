@@ -2,27 +2,77 @@
   "entities": {
     "business": {
       "title": "Business",
-      "description": "A business entity.",
+      "description": "A business entity configuration.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "timezone": { "type": "string" },
+        "notifySummary": { "type": "boolean" },
+        "notifyEmail": { "type": "boolean" },
+        "notifyTelegram": { "type": "boolean" },
+        "notifyWhatsapp": { "type": "boolean" },
+        "telegramChatId": { "type": "string" },
+        "telegramToken": { "type": "string" },
+        "gmailUser": { "type": "string" },
+        "gmailAppPass": { "type": "string" },
+        "whatsappApiKey": { "type": "string" },
+        "whatsappPhone": { "type": "string" }
+      },
+      "required": ["name", "ownerUid"]
+    },
+    "customer": {
+      "title": "Customer",
+      "description": "A customer of a business.",
       "type": "object",
       "properties": {
         "name": { "type": "string" },
         "email": { "type": "string" },
-        "telegramId": { "type": "string" },
-        "whatsappNumber": { "type": "string" }
+        "phone": { "type": "string" },
+        "couponsCount": { "type": "integer" },
+        "lastPurchaseAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name"]
     },
+    "purchase": {
+      "title": "Purchase",
+      "description": "A purchase record for a customer.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "coupons": { "type": "integer" }
+      },
+      "required": ["customerId", "timestamp"]
+    },
     "reminder": {
       "title": "Reminder",
-      "description": "A reminder entity.",
+      "description": "A scheduled reminder for a customer.",
       "type": "object",
       "properties": {
         "businessId": { "type": "string" },
+        "customerId": { "type": "string" },
         "message": { "type": "string" },
+        "subject": { "type": "string" },
         "scheduledAt": { "type": "string", "format": "date-time" },
-        "sent": { "type": "boolean" }
+        "status": { "type": "string", "enum": ["pending", "sent", "failed", "error"] },
+        "type": { "type": "string" },
+        "sentAt": { "type": "string", "format": "date-time" },
+        "results": { "type": "array" },
+        "error": { "type": "string" }
       },
-      "required": ["businessId", "message", "scheduledAt"]
+      "required": ["businessId", "customerId", "message", "scheduledAt", "status"]
+    },
+    "staff": {
+      "title": "Staff",
+      "description": "A staff member of a business.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string" }
+      },
+      "required": ["email"]
     }
   },
   "firestore": {
@@ -30,9 +80,21 @@
       "schema": "business",
       "description": "Collection of businesses."
     },
+    "/businesses/{businessId}/customers/{customerId}": {
+      "schema": "customer",
+      "description": "Subcollection of customers for a business."
+    },
+    "/businesses/{businessId}/purchases/{purchaseId}": {
+      "schema": "purchase",
+      "description": "Subcollection of purchases for a business."
+    },
+    "/businesses/{businessId}/staff/{staffEmail}": {
+      "schema": "staff",
+      "description": "Subcollection of staff for a business."
+    },
     "/reminders/{reminderId}": {
       "schema": "reminder",
-      "description": "Collection of reminders."
+      "description": "Top-level collection of reminders."
     }
   }
 }

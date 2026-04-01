@@ -3,11 +3,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx api/_server.ts",
+    "dev": "tsx server.ts",
     "build": "vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "start": "node api/_server.ts"
+    "start": "node server.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
