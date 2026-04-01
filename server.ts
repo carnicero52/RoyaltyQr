@@ -607,19 +607,20 @@ async function getAdminDb() {
 
   const dbId = config.firestoreDatabaseId && config.firestoreDatabaseId !== "(default)" && config.firestoreDatabaseId !== ""
     ? config.firestoreDatabaseId 
-    : "(default)";
+    : undefined;
 
   try {
+    const apps = getApps();
     let adminApp;
-    if (getApps().length === 0) {
+    if (apps.length === 0) {
       adminApp = initializeApp({
         projectId: config.projectId
       });
     } else {
-      adminApp = getApp();
+      adminApp = apps[0];
     }
     
-    const adminDb = getFirestore(adminApp, dbId === "(default)" ? undefined : dbId);
+    const adminDb = dbId ? getFirestore(adminApp, dbId) : getFirestore(adminApp);
     (adminDb as any).isClientSDK = false;
     return adminDb;
   } catch (err) {
@@ -632,84 +633,74 @@ app.post("/api/clear-history/:type", async (req, res) => {
   const { type } = req.params;
   const { businessId } = req.body;
 
+  console.log(`[API/ClearHistory] Request to clear ${type} for business ${businessId}`);
+
   if (!businessId) {
     return res.status(400).json({ error: "businessId is required" });
   }
 
   try {
-    // Try Admin SDK first to bypass security rules
-    let firestore: any = await getAdminDb();
-    let isClient = false;
-
+    // Force Admin SDK for deletion to bypass security rules
+    const firestore: any = await getAdminDb();
+    
     if (!firestore) {
-      console.warn("[API/ClearHistory] Admin SDK not available, falling back to Client SDK (may fail due to permissions)");
-      firestore = await getDb();
-      isClient = firestore?.isClientSDK;
+      console.error("[API/ClearHistory] Admin SDK failed to initialize.");
+      return res.status(500).json({ error: "No se pudo inicializar el acceso administrativo para borrar datos." });
     }
 
-    if (!firestore) return res.status(500).json({ error: "DB not initialized" });
-
     let deletedCount = 0;
-    
-    if (isClient) {
-      const remindersCol = collection(firestore, "reminders");
-      const q = query(remindersCol, where("businessId", "==", businessId));
-      const snapshot = await getDocs(q);
-      
-      const { deleteDoc } = await import("firebase/firestore");
-      
-      for (const docSnap of snapshot.docs) {
-        const data = docSnap.data();
-        if (data.type === type || (type === "billing" && !data.type)) {
-          await deleteDoc(docSnap.ref);
-          deletedCount++;
-        }
-      }
+    const docsToDelete: any[] = [];
 
-      if (type === "billing") {
-        const purchasesCol = collection(firestore, "businesses", businessId, "purchases");
-        const purchasesSnap = await getDocs(purchasesCol);
-        for (const docSnap of purchasesSnap.docs) {
-          await deleteDoc(docSnap.ref);
-          deletedCount++;
-        }
+    // 1. Collect reminders
+    const remindersSnap = await firestore.collection("reminders")
+      .where("businessId", "==", businessId)
+      .get();
+    
+    remindersSnap.docs.forEach((docSnap: any) => {
+      const data = docSnap.data();
+      // Match by type, or default to billing if no type exists (legacy)
+      if (data.type === type || (type === "billing" && !data.type)) {
+        docsToDelete.push(docSnap.ref);
       }
-    } else {
-      // Admin SDK path
-      const batch = firestore.batch();
-      const snapshot = await firestore.collection("reminders")
-        .where("businessId", "==", businessId)
+    });
+
+    // 2. Collect purchases (only for billing)
+    if (type === "billing") {
+      const purchasesSnap = await firestore.collection("businesses")
+        .doc(businessId)
+        .collection("purchases")
         .get();
       
-      snapshot.docs.forEach((docSnap: any) => {
-        const data = docSnap.data();
-        if (data.type === type || (type === "billing" && !data.type)) {
-          batch.delete(docSnap.ref);
-          deletedCount++;
-        }
+      purchasesSnap.docs.forEach((docSnap: any) => {
+        docsToDelete.push(docSnap.ref);
       });
+    }
 
-      if (type === "billing") {
-        const purchasesSnap = await firestore.collection("businesses").doc(businessId).collection("purchases").get();
-        purchasesSnap.docs.forEach((docSnap: any) => {
-          batch.delete(docSnap.ref);
-          deletedCount++;
-        });
-      }
-      
-      if (deletedCount > 0) {
-        await batch.commit();
-      }
+    console.log(`[API/ClearHistory] Found ${docsToDelete.length} documents to delete.`);
+
+    // 3. Delete in batches of 500 (Firestore limit)
+    for (let i = 0; i < docsToDelete.length; i += 500) {
+      const batch = firestore.batch();
+      const chunk = docsToDelete.slice(i, i + 500);
+      chunk.forEach((ref: any) => {
+        batch.delete(ref);
+        deletedCount++;
+      });
+      await batch.commit();
     }
 
     res.json({ 
       success: true, 
-      message: `Historial de ${type === "billing" ? "cobranzas" : "marketing"} limpiado con éxito.`,
+      message: `Historial de ${type === "billing" ? "cobranzas" : "marketing"} limpiado con éxito (${deletedCount} registros).`,
       deleted: deletedCount 
     });
   } catch (error: any) {
     console.error(`[API/ClearHistory] Error clearing ${type} history:`, error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      details: "Asegúrate de que el servidor tenga permisos de administrador en Firebase."
+    });
   }
 });
 
