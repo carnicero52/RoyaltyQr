@@ -1318,6 +1318,49 @@ export default function AdminPanel() {
                         <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", business.notificationsEnabled ? "right-1" : "left-1")}></div>
                       </button>
                     </div>
+
+                    <div className={cn(
+                      "flex items-center justify-between p-4 rounded-2xl transition-colors duration-300",
+                      business?.darkModeEnabled ? "bg-slate-800" : "bg-gray-50"
+                    )}>
+                      <div>
+                        <p className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Resumen Diario</p>
+                        <p className={cn("text-xs", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Recibe un resumen de ventas al final del día.</p>
+                      </div>
+                      <button
+                        onClick={() => setBusiness({ ...business, notifySummary: !business.notifySummary })}
+                        className={cn(
+                          "w-12 h-6 rounded-full transition-all relative",
+                          business.notifySummary ? "bg-orange-600" : "bg-gray-300"
+                        )}
+                      >
+                        <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", business.notifySummary ? "right-1" : "left-1")}></div>
+                      </button>
+                    </div>
+
+                    <div className={cn(
+                      "flex items-center justify-between p-4 rounded-2xl transition-colors duration-300",
+                      business?.darkModeEnabled ? "bg-slate-800" : "bg-gray-50"
+                    )}>
+                      <div>
+                        <p className={cn("font-bold", business?.darkModeEnabled ? "text-white" : "text-gray-900")}>Recordatorios Automáticos</p>
+                        <p className={cn("text-xs", business?.darkModeEnabled ? "text-slate-400" : "text-gray-500")}>Habilitar el envío de campañas programadas.</p>
+                      </div>
+                      <button
+                        onClick={() => setBusiness({ 
+                          ...business, 
+                          notifyEmail: !business.notifyEmail,
+                          notifyTelegram: !business.notifyTelegram,
+                          notifyWhatsapp: !business.notifyWhatsapp
+                        })}
+                        className={cn(
+                          "w-12 h-6 rounded-full transition-all relative",
+                          (business.notifyEmail || business.notifyTelegram || business.notifyWhatsapp) ? "bg-orange-600" : "bg-gray-300"
+                        )}
+                      >
+                        <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", (business.notifyEmail || business.notifyTelegram || business.notifyWhatsapp) ? "right-1" : "left-1")}></div>
+                      </button>
+                    </div>
                     <div>
                       <label className={cn("block text-sm font-medium mb-1 flex items-center space-x-2", business?.darkModeEnabled ? "text-slate-300" : "text-gray-700")}>
                         <Mail className="h-4 w-4" />

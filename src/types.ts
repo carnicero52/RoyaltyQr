@@ -25,6 +25,10 @@ export interface Business {
   themeColor?: string;
   darkModeEnabled?: boolean;
   timezone?: string; // e.g., 'America/Caracas'
+  notifyEmail?: boolean;
+  notifyTelegram?: boolean;
+  notifyWhatsapp?: boolean;
+  notifySummary?: boolean;
   // New: Loyalty Levels Config
   levels?: {
     silver: { minSpent: number; multiplier: number };

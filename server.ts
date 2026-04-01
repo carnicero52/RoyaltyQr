@@ -266,7 +266,9 @@ async function sendSummary() {
     
     for (const bDoc of businessesDocs) {
       const business = bDoc.data();
-      if (!business.notifySummary) continue;
+      // Use notificationsEnabled as a master switch if notifySummary is not explicitly set
+      if (business.notifySummary === false) continue;
+      if (!business.notificationsEnabled && !business.notifySummary) continue;
 
       const tz = business.timezone || "America/Caracas";
       const nowInTz = formatInTimeZone(new Date(), tz, "HH:mm");
@@ -326,16 +328,21 @@ async function checkReminders() {
     const remindersCol = await getCollection("reminders", firestore);
     const pendingDocs = await queryDocs(remindersCol, "status", "==", "pending", firestore);
 
+    console.log(`[Cron] Found ${pendingDocs.length} pending reminders.`);
+
     if (pendingDocs.length === 0) {
-      console.log("[Cron] No pending reminders.");
       return;
     }
 
     for (const docSnap of pendingDocs) {
       const reminderId = docSnap.id;
-      if (processingReminders.has(reminderId)) continue;
+      if (processingReminders.has(reminderId)) {
+        console.log(`[Cron] Reminder ${reminderId} is already being processed.`);
+        continue;
+      }
       
       const reminder = docSnap.data();
+      console.log(`[Cron] Checking reminder ${reminderId}: scheduledAt=${reminder.scheduledAt}, status=${reminder.status}`);
       let scheduledTime: Date;
 
       try {
@@ -357,7 +364,7 @@ async function checkReminders() {
 
       if (scheduledTime <= now) {
         processingReminders.add(reminderId);
-        console.log(`[Cron] Processing reminder: ${reminderId}`);
+        console.log(`[Cron] Processing reminder: ${reminderId} (Scheduled: ${scheduledTime.toISOString()}, Now: ${now.toISOString()})`);
 
         try {
           // Fetch business config
@@ -370,39 +377,68 @@ async function checkReminders() {
           }
 
           // Fetch customer data
-          const customerRef = firestore.isClientSDK 
-            ? doc(firestore, "businesses", reminder.businessId, "customers", reminder.customerId)
-            : firestore.collection("businesses").doc(reminder.businessId).collection("customers").doc(reminder.customerId);
-          const customerSnap = await fetchDoc(customerRef, firestore);
-          const customer = customerSnap.data();
-
-          if (!customer) {
-            throw new Error(`Customer ${reminder.customerId} not found.`);
+          const customerIds = reminder.customerIds || (reminder.customerId ? [reminder.customerId] : []);
+          if (customerIds.length === 0) {
+            throw new Error(`No customers found for reminder ${reminderId}`);
           }
 
-          // Determine notification methods
-          const methods = [];
-          if (business.notifyEmail && (customer.email || business.ownerEmail)) methods.push("email");
-          if (business.notifyTelegram && business.telegramChatId) methods.push("telegram");
-          if (business.notifyWhatsapp && (customer.phone || business.whatsappPhone)) methods.push("whatsapp");
+          const results: any[] = [];
+          let successCount = 0;
 
-          const results = [];
-          for (const method of methods) {
+          for (const customerId of customerIds) {
             try {
-              const to = method === "email" ? (customer.email || business.ownerEmail) : 
-                         method === "telegram" ? business.telegramChatId : 
-                         (customer.phone || business.whatsappPhone);
-              
-              await sendNotification(method, to, reminder.message, business, reminder.subject);
-              results.push({ method, status: "success" });
+              const customerRef = firestore.isClientSDK 
+                ? doc(firestore, "businesses", reminder.businessId, "customers", customerId)
+                : firestore.collection("businesses").doc(reminder.businessId).collection("customers").doc(customerId);
+              const customerSnap = await fetchDoc(customerRef, firestore);
+              const customer = customerSnap.data();
+
+              if (!customer) {
+                console.warn(`[Cron] Customer ${customerId} not found for reminder ${reminderId}`);
+                results.push({ customerId, status: "error", error: "Customer not found" });
+                continue;
+              }
+
+              // Determine notification methods
+              const methods = [];
+              // Check if credentials exist and if the method is enabled (default to enabled if credentials exist)
+              if (business.gmailUser && business.gmailAppPass && (customer.email || business.ownerEmail)) {
+                if (business.notifyEmail !== false) methods.push("email");
+              }
+              if (business.telegramToken && business.telegramChatId) {
+                if (business.notifyTelegram !== false) methods.push("telegram");
+              }
+              if (business.whatsappEnabled && business.whatsappApiKey && (customer.phone || business.whatsappPhone)) {
+                if (business.notifyWhatsapp !== false) methods.push("whatsapp");
+              }
+
+              for (const method of methods) {
+                try {
+                  const to = method === "email" ? (customer.email || business.ownerEmail) : 
+                             method === "telegram" ? business.telegramChatId : 
+                             (customer.phone || business.whatsappPhone);
+                  
+                  if (!to) {
+                    console.warn(`[Cron] No destination for ${method} to customer ${customerId}`);
+                    continue;
+                  }
+
+                  await sendNotification(method, to, reminder.message, business, reminder.subject);
+                  results.push({ customerId, method, status: "success" });
+                  successCount++;
+                } catch (err: any) {
+                  console.error(`[Cron] Error sending ${method} to ${customerId}:`, err.message);
+                  results.push({ customerId, method, status: "error", error: err.message });
+                }
+              }
             } catch (err: any) {
-              console.error(`[Cron] Error sending ${method}:`, err.message);
-              results.push({ method, status: "error", error: err.message });
+              console.error(`[Cron] Error processing customer ${customerId}:`, err.message);
+              results.push({ customerId, status: "error", error: err.message });
             }
           }
 
           // Update reminder status
-          const finalStatus = results.some(r => r.status === "success") ? "sent" : "failed";
+          const finalStatus = successCount > 0 ? "sent" : "failed";
           const updateData = {
             status: finalStatus,
             sentAt: firestore.isClientSDK ? serverTimestamp() : FieldValue.serverTimestamp(),
@@ -415,10 +451,10 @@ async function checkReminders() {
             await (docSnap.ref as any).update(updateData);
           }
 
-          // Notify admin if it failed
-          if (finalStatus === "failed") {
+          // Notify admin if it failed completely
+          if (finalStatus === "failed" && business.telegramChatId) {
             try {
-              await sendNotification("telegram", business.telegramChatId, `⚠️ Error al enviar recordatorio a ${customer.name}: ${results.map(r => r.error).join(", ")}`, business);
+              await sendNotification("telegram", business.telegramChatId, `⚠️ Error al enviar recordatorio "${reminder.subject || 'Sin asunto'}": No se pudo enviar a ningún cliente.`, business);
             } catch (e) {}
           }
 
@@ -436,6 +472,8 @@ async function checkReminders() {
         } finally {
           processingReminders.delete(reminderId);
         }
+      } else {
+        console.log(`[Cron] Skipping reminder ${reminderId}: Not time yet (Scheduled: ${scheduledTime.toISOString()}, Now: ${now.toISOString()})`);
       }
     }
   } catch (error: any) {
